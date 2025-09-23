@@ -208,6 +208,12 @@ export class SaveManager {
     this.setters.setDailyStats(gameState.dailyStats || []);
     this.setters.setAutomation(gameState.automation || { autoWater: false, autoHarvest: false });
     this.setters.setMarketPrices(gameState.marketPrices || {});
+    if (typeof this.setters.setPreviousMarketPrices === 'function') {
+      this.setters.setPreviousMarketPrices(gameState.marketPrices || {});
+    }
+    if (typeof this.setters.setMarketUpdateTime === 'function') {
+      this.setters.setMarketUpdateTime(Date.now());
+    }
     this.setters.setSelectedSupply(gameState.selectedSupply || null);
   }
 

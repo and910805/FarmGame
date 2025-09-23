@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { Sprout, Coins, ShoppingCart, Heart, Home, Sun, Moon, Zap, Droplets, Hammer, Building, Star, Save, Trophy, Settings, MessageCircle, Target, UtensilsCrossed } from 'lucide-react';
+import { Sprout, Coins, ShoppingCart, Heart, Home, Sun, Moon, Zap, Droplets, Hammer, Building, Star, Save, Trophy, Settings, MessageCircle, Target, UtensilsCrossed, TrendingUp, TrendingDown, Clock3, Boxes } from 'lucide-react';
 import { CROPS, ANIMALS, BUILDINGS, TOOLS, ACHIEVEMENTS, NPCS, WEATHER_TYPES, SEASONS, FARM_SUPPLIES, ANIMAL_PRODUCTS } from './game/data/GameCatalog';
 import { GameFormatter } from './game/utils/GameFormatter';
 import { GameEngine, getFarmExpansionCost, getAnimalHousingExpansionCost, BASE_FARM_PLOTS, MAX_FARM_PLOTS, BASE_ANIMAL_CAPACITY, MAX_ANIMAL_CAPACITY } from './game/engine/GameEngine';
@@ -103,6 +103,8 @@ const FarmGame = () => {
   const [completedAchievements, setCompletedAchievements] = useState(new Set());
   const [aiAdvice, setAiAdvice] = useState('');
   const [marketPrices, setMarketPrices] = useState({});
+  const [previousMarketPrices, setPreviousMarketPrices] = useState({});
+  const [marketUpdateTime, setMarketUpdateTime] = useState(null);
   const [dailyStats, setDailyStats] = useState([]);
   const [automation, setAutomation] = useState({ autoWater: false, autoHarvest: false });
   
@@ -140,6 +142,8 @@ const FarmGame = () => {
     dailyStats,
     automation,
     marketPrices,
+    previousMarketPrices,
+    marketUpdateTime,
     saveSlots,
     selectedSeed,
     selectedSupply,
@@ -169,6 +173,8 @@ const FarmGame = () => {
       setDailyStats,
       setAutomation,
       setMarketPrices,
+      setPreviousMarketPrices,
+      setMarketUpdateTime,
       setSaveSlots,
       setShowSaveMenu,
       setShowLoadMenu,
@@ -203,7 +209,111 @@ const FarmGame = () => {
       setShowToolShop,
     },
     notifier: addNotification,
-  }), [addNotification]);
+  }), [stateRef, addNotification]);
+
+  const marketInsights = useMemo(() => {
+    const entries = Object.entries(CROPS).map(([key, crop]) => {
+      const price = marketPrices?.[key] ?? crop.sellPrice;
+      const basePrice = crop.sellPrice;
+      const previousPrice = previousMarketPrices?.[key];
+      const changeFromBase = price - basePrice;
+      const percentFromBase = basePrice ? (changeFromBase / basePrice) * 100 : 0;
+      const changeFromPrevious = typeof previousPrice === 'number' ? price - previousPrice : null;
+      const percentFromPrevious =
+        typeof previousPrice === 'number' && previousPrice !== 0
+          ? (changeFromPrevious / previousPrice) * 100
+          : null;
+
+      return {
+        key,
+        name: crop.name,
+        emoji: crop.emoji,
+        price,
+        basePrice,
+        changeFromBase,
+        percentFromBase,
+        previousPrice,
+        changeFromPrevious,
+        percentFromPrevious,
+      };
+    });
+
+    const sortedByPremium = [...entries].sort((a, b) => b.percentFromBase - a.percentFromBase);
+    const risers = entries
+      .filter(entry => (entry.changeFromPrevious ?? 0) > 0)
+      .sort((a, b) => (b.changeFromPrevious ?? 0) - (a.changeFromPrevious ?? 0))
+      .slice(0, 3);
+    const fallers = entries
+      .filter(entry => (entry.changeFromPrevious ?? 0) < 0)
+      .sort((a, b) => (a.changeFromPrevious ?? 0) - (b.changeFromPrevious ?? 0))
+      .slice(0, 3);
+    const averageIndex = entries.length > 0
+      ? entries.reduce((sum, entry) => sum + (entry.basePrice ? (entry.price / entry.basePrice) : 1), 0) / entries.length
+      : 1;
+    const highestPrice = entries.reduce((max, entry) => Math.max(max, entry.price), 0);
+
+    return {
+      entries,
+      sortedByPremium,
+      risers,
+      fallers,
+      averageIndex,
+      highestPrice,
+    };
+  }, [marketPrices, previousMarketPrices]);
+
+  const inventoryInsights = useMemo(() => {
+    const sourceInventory = inventory || {};
+    const items = [];
+    let totalCount = 0;
+    let totalValue = 0;
+
+    Object.entries(sourceInventory).forEach(([key, count]) => {
+      if (!count) return;
+      const metadata = INVENTORY_METADATA[key];
+      if (!metadata) return;
+
+      const totalItemValue = gameEngine.getInventorySaleValue(key, count);
+      const unitValue = count > 0 ? Math.max(0, Math.round(totalItemValue / count)) : 0;
+
+      totalCount += count;
+      totalValue += totalItemValue;
+
+      items.push({
+        key,
+        ...metadata,
+        count,
+        unitValue,
+        totalValue: totalItemValue,
+        canSell: totalItemValue > 0,
+      });
+    });
+
+    const sortedItems = items.sort((a, b) => {
+      if (b.totalValue === a.totalValue) {
+        return b.count - a.count;
+      }
+      return b.totalValue - a.totalValue;
+    });
+
+    const safeTotalValue = totalValue;
+    const safeTotalCount = totalCount;
+    sortedItems.forEach(item => {
+      if (safeTotalValue > 0) {
+        item.share = Math.round((item.totalValue / safeTotalValue) * 100);
+      } else if (safeTotalCount > 0) {
+        item.share = Math.round((item.count / safeTotalCount) * 100);
+      } else {
+        item.share = 0;
+      }
+    });
+
+    return {
+      items: sortedItems,
+      totalCount: safeTotalCount,
+      totalValue: Math.round(safeTotalValue),
+    };
+  }, [inventory, gameEngine, animals, buildings, marketPrices]);
 
   const saveToSlot = useCallback((slotName) => {
     saveManager.saveToSlot(slotName);
@@ -268,19 +378,22 @@ const FarmGame = () => {
   // 動態市場價格
   useEffect(() => {
     const updatePrices = () => {
+      const previousSnapshot = stateRef.current.marketPrices || {};
       const newPrices = {};
       Object.keys(CROPS).forEach(crop => {
         const basePrice = CROPS[crop].sellPrice;
         const fluctuation = 0.8 + Math.random() * 0.4;
         newPrices[crop] = Math.floor(basePrice * fluctuation);
       });
+      setPreviousMarketPrices(previousSnapshot);
       setMarketPrices(newPrices);
+      setMarketUpdateTime(Date.now());
     };
-    
+
     updatePrices();
     const timer = setInterval(updatePrices, 120000);
     return () => clearInterval(timer);
-  }, []);
+  }, [stateRef]);
 
   // 成就系統
   useEffect(() => {
@@ -664,8 +777,16 @@ const FarmGame = () => {
     gameEngine.expandAnimalHousing();
   }, [gameEngine]);
 
-  const sellInventoryItem = useCallback((itemKey) => {
-    gameEngine.sellInventoryItem(itemKey);
+  const sellInventoryItem = useCallback((itemKey, quantity) => {
+    if (typeof quantity === 'number' && quantity <= 0) {
+      return;
+    }
+
+    if (typeof quantity === 'number') {
+      gameEngine.sellInventoryItem(itemKey, { quantity });
+    } else {
+      gameEngine.sellInventoryItem(itemKey);
+    }
   }, [gameEngine]);
 
   const buyAnimal = useCallback((animalType) => {
@@ -1071,57 +1192,183 @@ const FarmGame = () => {
 
             {/* 市場價格 */}
             <div className="bg-white bg-opacity-90 rounded-lg p-4 shadow-lg">
-              <h3 className="text-lg font-bold mb-3">市場價格</h3>
-              <div className="space-y-1">
-                {Object.entries(marketPrices).slice(0, 3).map(([crop, price]) => (
-                  <div key={crop} className="flex justify-between items-center text-sm">
-                    <span>{CROPS[crop].emoji} {CROPS[crop].name}</span>
-                    <span className={`font-semibold ${
-                      price > CROPS[crop].sellPrice ? 'text-green-600' : 
-                      price < CROPS[crop].sellPrice ? 'text-red-600' : 'text-gray-600'
-                    }`}>
-                      ${price}
-                    </span>
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-lg font-bold flex items-center gap-2">
+                  <TrendingUp className="w-4 h-4 text-green-600" />
+                  市場價格
+                </h3>
+                <div className="flex items-center gap-1 text-xs text-gray-500">
+                  <Clock3 className="w-3 h-3" />
+                  <span>{marketUpdateTime ? new Date(marketUpdateTime).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' }) : '更新中…'}</span>
+                </div>
+              </div>
+              <div className="bg-slate-50 border border-slate-200 rounded-lg p-2 mb-3">
+                <div className="flex items-center justify-between text-xs text-slate-600">
+                  <span>平均行情指數</span>
+                  <span className={`font-semibold ${marketInsights.averageIndex >= 1 ? 'text-green-600' : 'text-red-600'}`}>
+                    {(marketInsights.averageIndex * 100).toFixed(0)}%
+                  </span>
+                </div>
+                <div className="bg-slate-200 h-1 rounded-full overflow-hidden mt-2">
+                  <div
+                    className={`${marketInsights.averageIndex >= 1 ? 'bg-green-400' : 'bg-red-400'} h-full transition-all`}
+                    style={{ width: `${Math.min(100, Math.max(6, marketInsights.averageIndex * 100))}%` }}
+                  ></div>
+                </div>
+              </div>
+              {marketInsights.risers.length > 0 && (
+                <div className="mb-3">
+                  <div className="flex items-center gap-1 text-xs font-semibold text-green-600 uppercase tracking-wide">
+                    <TrendingUp className="w-3 h-3" />
+                    漲勢領先
                   </div>
-                ))}
+                  <div className="mt-1 space-y-1">
+                    {marketInsights.risers.map(entry => {
+                      const percentText = entry.percentFromPrevious != null ? entry.percentFromPrevious.toFixed(1) : '—';
+                      const percentDisplay = percentText === '—' ? '—' : `${percentText}%`;
+                      return (
+                        <div key={`rise-${entry.key}`} className="flex items-center justify-between text-xs bg-green-50 border border-green-100 rounded px-2 py-1 text-green-700">
+                          <span>{entry.emoji} {entry.name}</span>
+                          <span>
+                            +${entry.changeFromPrevious} ({percentDisplay})
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+              {marketInsights.fallers.length > 0 && (
+                <div className="mb-3">
+                  <div className="flex items-center gap-1 text-xs font-semibold text-red-600 uppercase tracking-wide">
+                    <TrendingDown className="w-3 h-3" />
+                    價格回落
+                  </div>
+                  <div className="mt-1 space-y-1">
+                    {marketInsights.fallers.map(entry => {
+                      const percentText = entry.percentFromPrevious != null ? Math.abs(entry.percentFromPrevious).toFixed(1) : '—';
+                      const percentDisplay = percentText === '—' ? '—' : `${percentText}%`;
+                      return (
+                        <div key={`fall-${entry.key}`} className="flex items-center justify-between text-xs bg-red-50 border border-red-100 rounded px-2 py-1 text-red-700">
+                          <span>{entry.emoji} {entry.name}</span>
+                          <span>
+                            -${Math.abs(entry.changeFromPrevious)} ({percentDisplay})
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+              <div className="space-y-2 border-t border-slate-200 pt-2">
+                {marketInsights.sortedByPremium.slice(0, 5).map(entry => {
+                  const trend = entry.changeFromPrevious ?? 0;
+                  const trendClass = trend > 0 ? 'text-green-600' : trend < 0 ? 'text-red-600' : 'text-gray-500';
+                  const premiumClass = entry.changeFromBase > 0 ? 'text-green-600' : entry.changeFromBase < 0 ? 'text-red-600' : 'text-gray-600';
+                  const percentFromPrevious = entry.percentFromPrevious != null ? entry.percentFromPrevious.toFixed(1) : '—';
+                  const premiumPercent = `${entry.percentFromBase >= 0 ? '+' : ''}${entry.percentFromBase.toFixed(1)}%`;
+                  const priceShare = marketInsights.highestPrice > 0 ? Math.min(100, Math.max(6, (entry.price / marketInsights.highestPrice) * 100)) : 0;
+
+                  return (
+                    <div key={entry.key} className="rounded-lg border border-slate-200 p-2">
+                      <div className="flex justify-between items-center text-sm font-semibold text-slate-800">
+                        <span>{entry.emoji} {entry.name}</span>
+                        <span>${entry.price}</span>
+                      </div>
+                      <div className="flex justify-between text-xs mt-1 text-slate-500">
+                        <span>基準 ${entry.basePrice}</span>
+                        <span className={premiumClass}>
+                          {entry.changeFromBase >= 0 ? '+' : ''}{entry.changeFromBase} ({premiumPercent})
+                        </span>
+                      </div>
+                      <div className="flex justify-between text-xs mt-1">
+                        <span className={trendClass}>
+                          {trend > 0 ? `▲ +${trend}` : trend < 0 ? `▼ ${trend}` : '→ 持平'}
+                        </span>
+                        <span className={trendClass}>
+                          {percentFromPrevious !== '—' ? `${trend > 0 ? '+' : ''}${percentFromPrevious}%` : '—'}
+                        </span>
+                      </div>
+                      <div className="bg-slate-100 h-1 rounded-full overflow-hidden mt-2">
+                        <div
+                          className="bg-slate-400 h-full transition-all"
+                          style={{ width: `${priceShare}%` }}
+                        ></div>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </div>
 
             {/* 庫存 */}
             <div className="bg-white bg-opacity-90 rounded-lg p-4 shadow-lg">
-              <h3 className="text-lg font-bold mb-3">庫存</h3>
-              {INVENTORY_ORDER.map((key) => {
-                const count = inventory[key] || 0;
-                if (count <= 0) {
-                  return null;
-                }
+              <div className="flex items-start justify-between mb-3">
+                <div>
+                  <h3 className="text-lg font-bold flex items-center gap-2">
+                    <Boxes className="w-4 h-4 text-amber-600" />
+                    庫存
+                  </h3>
+                  <p className="text-xs text-gray-500 mt-1">動物產品與作物收成都集中在這裡管理。</p>
+                </div>
+                <div className="text-right text-xs">
+                  <div className="text-gray-500">共 {inventoryInsights.totalCount} 件</div>
+                  <div className="text-amber-600 font-semibold">估值 ${inventoryInsights.totalValue}</div>
+                </div>
+              </div>
+              {inventoryInsights.items.length > 0 ? (
+                <div className="space-y-2">
+                  {inventoryInsights.items.map(item => {
+                    const halfQuantity = Math.floor(item.count / 2);
+                    const shareWidth = item.share > 0 ? Math.min(100, Math.max(6, item.share)) : 0;
 
-                const item = INVENTORY_METADATA[key];
-                const saleValue = item.type === 'product' ? gameEngine.getInventorySaleValue(key, count) : 0;
-                const canSell = item.type === 'product' && saleValue > 0;
-
-                return (
-                  <div key={key} className="flex justify-between items-center py-1">
-                    <span>{item.emoji} {item.name}</span>
-                    <div className="flex items-center gap-2">
-                      <span className="font-semibold">{count}</span>
-                      {canSell && (
-                        <button
-                          onClick={() => sellInventoryItem(key)}
-                          className="text-xs bg-amber-500 hover:bg-amber-600 text-white px-2 py-1 rounded transition-colors"
-                        >
-                          出售（{'$'}{saleValue}）
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-              {INVENTORY_ORDER.every(key => (inventory[key] || 0) === 0) && (
-                <p className="text-gray-500 text-sm">庫存為空</p>
-              )}
-              {Object.keys(ANIMAL_PRODUCTS).some(key => (inventory[key] || 0) > 0) && (
-                <p className="text-xs text-amber-600 mt-2">提示：雞蛋與鮮奶可在此處直接出售換現金！</p>
+                    return (
+                      <div key={item.key} className="rounded-lg border border-amber-200 bg-amber-50/80 p-3">
+                        <div className="flex justify-between items-start">
+                          <div className="flex items-center gap-3">
+                            <div className="text-2xl">{item.emoji}</div>
+                            <div>
+                              <div className="font-semibold text-sm text-amber-900">{item.name}</div>
+                              <div className="text-xs text-amber-700">
+                                {item.type === 'product' ? '畜產品' : '作物'} · 單價 ${item.unitValue}
+                              </div>
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <div className="font-bold text-sm text-amber-900">x{item.count}</div>
+                            <div className="text-xs text-amber-700">總值 ${item.totalValue}</div>
+                          </div>
+                        </div>
+                        <div className="bg-amber-100 h-1 rounded-full overflow-hidden mt-2">
+                          <div
+                            className="bg-amber-400 h-full transition-all"
+                            style={{ width: `${shareWidth}%` }}
+                          ></div>
+                        </div>
+                        {item.canSell && (
+                          <div className="flex justify-end gap-2 mt-2">
+                            {halfQuantity > 0 && halfQuantity < item.count && (
+                              <button
+                                onClick={() => sellInventoryItem(item.key, halfQuantity)}
+                                className="text-xs bg-white border border-amber-300 hover:border-amber-400 text-amber-700 px-2 py-1 rounded transition-colors"
+                              >
+                                出售 {halfQuantity} 個
+                              </button>
+                            )}
+                            <button
+                              onClick={() => sellInventoryItem(item.key)}
+                              className="text-xs bg-amber-500 hover:bg-amber-600 text-white px-2 py-1 rounded transition-colors"
+                            >
+                              全部出售（${item.totalValue}）
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <p className="text-gray-500 text-sm">庫存為空，快去田裡收成或向動物們索取產品吧！</p>
               )}
             </div>
 
