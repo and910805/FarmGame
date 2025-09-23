@@ -81,6 +81,7 @@ export class SaveManager {
       marketPrices,
       selectedSupply,
       animalCapacity,
+      questLog,
     } = this.state;
 
     const safeFarm = Array.isArray(farm) ? farm : [];
@@ -114,6 +115,7 @@ export class SaveManager {
       marketPrices,
       selectedSupply: selectedSupply || null,
       animalCapacity: Math.max(animalCapacity || BASE_ANIMAL_CAPACITY, BASE_ANIMAL_CAPACITY),
+      questLog: questLog || {},
       saveTime: new Date().toISOString(),
       version: '1.1',
     };
@@ -158,6 +160,7 @@ export class SaveManager {
     this.setters.setWeather(gameState.weather);
     this.setters.setWeatherDuration(gameState.weatherDuration || 5);
     this.setters.setInventory(withInventoryDefaults(gameState.inventory));
+    this.setters.setQuestLog(gameState.questLog ? { ...gameState.questLog } : {});
     const sanitizedFarm = Array.isArray(gameState.farm)
       ? gameState.farm.map((plot, index) => ({
           id: plot.id ?? index,

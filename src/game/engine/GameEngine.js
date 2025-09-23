@@ -4,17 +4,21 @@ export const BASE_FARM_PLOTS = 25;
 export const FARM_EXPANSION_BATCH = 5;
 export const MAX_FARM_PLOTS = 45;
 export const BASE_ANIMAL_CAPACITY = 6;
-export const ANIMAL_CAPACITY_STEP = 3;
+export const ANIMAL_CAPACITY_STEP = 1;
 export const MAX_ANIMAL_CAPACITY = 24;
 
 export const getFarmExpansionCost = (currentPlotCount) => {
-  const purchasedBatches = Math.max(0, Math.floor((currentPlotCount - BASE_FARM_PLOTS) / FARM_EXPANSION_BATCH));
-  return 500 + purchasedBatches * 200;
+  if (currentPlotCount >= MAX_FARM_PLOTS) {
+    return null;
+  }
+  return 5000;
 };
 
 export const getAnimalHousingExpansionCost = (currentCapacity) => {
-  const purchasedSteps = Math.max(0, Math.floor((currentCapacity - BASE_ANIMAL_CAPACITY) / ANIMAL_CAPACITY_STEP));
-  return 650 + purchasedSteps * 250;
+  if (currentCapacity >= MAX_ANIMAL_CAPACITY) {
+    return null;
+  }
+  return 2500;
 };
 
 export class GameEngine {
@@ -31,6 +35,12 @@ export class GameEngine {
   notify(message, options) {
     if (this.notifier) {
       this.notifier(message, options);
+    }
+  }
+
+  emitQuestEvent(event) {
+    if (typeof this.setters.recordQuestEvent === 'function') {
+      this.setters.recordQuestEvent(event);
     }
   }
 
@@ -109,6 +119,10 @@ export class GameEngine {
     }
 
     const price = getFarmExpansionCost(farm.length);
+    if (price == null) {
+      this.notify('農地目前無法擴建。', { type: 'info' });
+      return;
+    }
     if (money < price) {
       this.notify('金錢不足，暫時無法擴建農地。', { type: 'error' });
       return;
@@ -151,6 +165,10 @@ export class GameEngine {
     }
 
     const price = getAnimalHousingExpansionCost(currentCapacity);
+    if (price == null) {
+      this.notify('暫時無法擴建動物欄。', { type: 'info' });
+      return;
+    }
     if (money < price) {
       this.notify('金錢不足，暫時無法擴建動物欄。', { type: 'error' });
       return;
@@ -246,6 +264,7 @@ export class GameEngine {
       )));
       this.consumeSupply('pesticide', { keepSelection: available > 1 });
       this.notify('成功清除害蟲，作物恢復生長！', { type: 'success' });
+      this.emitQuestEvent({ type: 'pestClear', amount: 1 });
       return true;
     }
 
@@ -327,6 +346,7 @@ export class GameEngine {
     )));
 
     this.notify(`收成了 ${CROPS[crop].emoji}！獲得 $${sellPrice}`, { type: 'success' });
+    this.emitQuestEvent({ type: 'harvest', crop, amount: 1 });
   }
 
   waterPlot(plotId) {
@@ -574,6 +594,10 @@ export class GameEngine {
       this.notify(`出售了 ${amountToSell} 份${CROPS[itemKey].name}，獲得 $${saleValue}！`, { type: 'success' });
     } else {
       this.notify(`出售物品獲得 $${saleValue}！`, { type: 'success' });
+    }
+
+    if (CROPS[itemKey]) {
+      this.emitQuestEvent({ type: 'sell', crop: itemKey, amount: amountToSell });
     }
   }
 

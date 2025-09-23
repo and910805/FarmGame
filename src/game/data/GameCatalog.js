@@ -166,13 +166,46 @@ class GameCatalog {
         name: '農夫老張',
         emoji: '👨‍🌾',
         dialogue: ['今天天氣真好呢！', '記得給作物澆水哦！', '我這裡有些好種子...'],
-        quests: [{ type: 'plant', target: 'carrot', count: 5, reward: 200 }],
+        quests: [
+          {
+            id: 'farmer_wheat_bundle',
+            type: 'deliver',
+            target: 'wheat',
+            count: 30,
+            reward: 480,
+            description: '收穫祭要到了，老張需要 30 束小麥來布置穀倉。',
+          },
+          {
+            id: 'farmer_pest_control',
+            type: 'pestClear',
+            count: 3,
+            reward: 260,
+            description: '最近害蟲肆虐，幫忙處理 3 塊農地的蟲害吧。',
+          },
+        ],
       }),
       new NPC({
         name: '商人小李',
         emoji: '👨‍💼',
         dialogue: ['生意興隆！', '需要什麼嗎？', '我有特價商品！'],
-        quests: [{ type: 'sell', target: 'tomato', count: 10, reward: 300 }],
+        quests: [
+          {
+            id: 'merchant_carrot_bulk',
+            type: 'deliver',
+            target: 'carrot',
+            count: 50,
+            reward: 1500,
+            description: '小李接到外地大單，需要 50 根胡蘿蔔立即出貨。',
+          },
+          {
+            id: 'merchant_sweet_wave',
+            type: 'sell',
+            target: 'strawberry',
+            count: 25,
+            reward: 620,
+            description: '市場草莓熱潮來了！賣出 25 盒草莓即可分紅。',
+          },
+        ],
       }),
     ];
   }

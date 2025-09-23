@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { Sprout, Coins, ShoppingCart, Heart, Home, Sun, Moon, Zap, Droplets, Hammer, Building, Star, Save, Trophy, Settings, MessageCircle, Target, UtensilsCrossed, TrendingUp, TrendingDown, Clock3, Boxes } from 'lucide-react';
 import { CROPS, ANIMALS, BUILDINGS, TOOLS, ACHIEVEMENTS, NPCS, WEATHER_TYPES, SEASONS, FARM_SUPPLIES, ANIMAL_PRODUCTS } from './game/data/GameCatalog';
 import { GameFormatter } from './game/utils/GameFormatter';
-import { GameEngine, getFarmExpansionCost, getAnimalHousingExpansionCost, BASE_FARM_PLOTS, MAX_FARM_PLOTS, BASE_ANIMAL_CAPACITY, MAX_ANIMAL_CAPACITY } from './game/engine/GameEngine';
+import { GameEngine, getFarmExpansionCost, getAnimalHousingExpansionCost, BASE_FARM_PLOTS, MAX_FARM_PLOTS, BASE_ANIMAL_CAPACITY, MAX_ANIMAL_CAPACITY, FARM_EXPANSION_BATCH, ANIMAL_CAPACITY_STEP } from './game/engine/GameEngine';
 import { SaveManager } from './game/engine/SaveManager';
 import { NotificationCenter } from './game/engine/NotificationCenter';
 
@@ -56,6 +56,8 @@ const FarmGame = () => {
     medicine: 0,
   });
 
+  const [questLog, setQuestLog] = useState({});
+
   const [animals, setAnimals] = useState([]);
   const [animalCapacity, setAnimalCapacity] = useState(BASE_ANIMAL_CAPACITY);
   const [buildings, setBuildings] = useState({});
@@ -81,6 +83,41 @@ const FarmGame = () => {
   const [marketView, setMarketView] = useState('summary');
   const [marketListSort, setMarketListSort] = useState('price');
   const [inventorySortMode, setInventorySortMode] = useState('value');
+
+  const questDefinitions = useMemo(() => {
+    const map = {};
+    NPCS.forEach(npc => {
+      (npc.quests || []).forEach(quest => {
+        if (quest?.id) {
+          map[quest.id] = { ...quest, npcName: npc.name };
+        }
+      });
+    });
+    return map;
+  }, []);
+
+  const getQuestTargetLabel = useCallback((quest) => {
+    if (!quest?.target) {
+      return '目標';
+    }
+
+    if (CROPS[quest.target]) {
+      const crop = CROPS[quest.target];
+      return `${crop.emoji} ${crop.name}`;
+    }
+
+    if (ANIMAL_PRODUCTS[quest.target]) {
+      const product = ANIMAL_PRODUCTS[quest.target];
+      return `${product.emoji} ${product.name}`;
+    }
+
+    if (FARM_SUPPLIES[quest.target]) {
+      const supply = FARM_SUPPLIES[quest.target];
+      return `${supply.emoji} ${supply.name}`;
+    }
+
+    return quest.target;
+  }, []);
 
   const notificationCenter = useMemo(() => new NotificationCenter(setNotifications), []);
   const addNotification = useCallback((message, options) => {
@@ -138,6 +175,7 @@ const FarmGame = () => {
     inventory,
     farm,
     farmSupplies,
+    questLog,
     animals,
     animalCapacity,
     buildings,
@@ -177,6 +215,7 @@ const FarmGame = () => {
       setBuildings,
       setTools,
       setFarmSupplies,
+      setQuestLog,
       setCompletedAchievements,
       setDailyStats,
       setAutomation,
@@ -195,6 +234,81 @@ const FarmGame = () => {
     },
     notifier: addNotification,
   }), [addNotification]);
+
+  const recordQuestEvent = useCallback((event) => {
+    if (!event?.type) {
+      return;
+    }
+
+    setQuestLog(prev => {
+      if (!prev || Object.keys(prev).length === 0) {
+        return prev;
+      }
+
+      let mutated = false;
+      const next = { ...prev };
+
+      Object.entries(prev).forEach(([questId, entry]) => {
+        if (!entry || (entry.status !== 'accepted' && entry.status !== 'ready')) {
+          return;
+        }
+
+        const quest = questDefinitions[questId];
+        if (!quest) {
+          return;
+        }
+
+        const required = quest.count ?? 0;
+        const currentProgress = entry.progress ?? 0;
+        let updatedEntry = entry;
+
+        switch (quest.type) {
+          case 'harvest':
+            if (event.type === 'harvest' && event.crop === quest.target) {
+              const newProgress = Math.min(required, currentProgress + (event.amount ?? 1));
+              if (newProgress !== currentProgress || entry.status !== 'ready') {
+                updatedEntry = { ...entry, progress: newProgress };
+                if (required > 0 && newProgress >= required) {
+                  updatedEntry.status = 'ready';
+                }
+              }
+            }
+            break;
+          case 'sell':
+            if (event.type === 'sell' && event.crop === quest.target) {
+              const newProgress = Math.min(required, currentProgress + (event.amount ?? 1));
+              if (newProgress !== currentProgress || entry.status !== 'ready') {
+                updatedEntry = { ...entry, progress: newProgress };
+                if (required > 0 && newProgress >= required) {
+                  updatedEntry.status = 'ready';
+                }
+              }
+            }
+            break;
+          case 'pestClear':
+            if (event.type === 'pestClear') {
+              const newProgress = Math.min(required, currentProgress + (event.amount ?? 1));
+              if (newProgress !== currentProgress || entry.status !== 'ready') {
+                updatedEntry = { ...entry, progress: newProgress };
+                if (required > 0 && newProgress >= required) {
+                  updatedEntry.status = 'ready';
+                }
+              }
+            }
+            break;
+          default:
+            break;
+        }
+
+        if (updatedEntry !== entry) {
+          next[questId] = updatedEntry;
+          mutated = true;
+        }
+      });
+
+      return mutated ? next : prev;
+    });
+  }, [questDefinitions]);
 
   const gameEngine = useMemo(() => new GameEngine({
     stateRef,
@@ -217,9 +331,152 @@ const FarmGame = () => {
       setTools,
       setShowToolShop,
       setPendingGreenhousePlacement,
+      recordQuestEvent,
     },
     notifier: addNotification,
-  }), [stateRef, addNotification]);
+  }), [stateRef, addNotification, recordQuestEvent]);
+
+  const acceptQuest = useCallback((questId) => {
+    const quest = questDefinitions[questId];
+    if (!quest) {
+      return;
+    }
+
+    const existing = questLog[questId];
+    if (existing?.status === 'accepted' || existing?.status === 'ready') {
+      addNotification('任務已在進行中！', { type: 'info' });
+      return;
+    }
+    if (existing?.status === 'completed') {
+      addNotification('這項任務已經完成過囉！', { type: 'info' });
+      return;
+    }
+
+    setQuestLog(prev => ({
+      ...prev,
+      [questId]: {
+        status: 'accepted',
+        progress: 0,
+        acceptedDay: day,
+      },
+    }));
+    addNotification(`📜 接下任務：「${quest.description}」`, { type: 'info' });
+  }, [questDefinitions, questLog, setQuestLog, addNotification, day]);
+
+  const deliverQuest = useCallback((questId) => {
+    const quest = questDefinitions[questId];
+    if (!quest || quest.type !== 'deliver') {
+      return;
+    }
+
+    const entry = questLog[questId];
+    if (!entry || entry.status !== 'accepted') {
+      if (entry?.status === 'completed') {
+        addNotification('任務已經交付完成。', { type: 'info' });
+      } else {
+        addNotification('請先接受任務再進行交付。', { type: 'warning' });
+      }
+      return;
+    }
+
+    const needCount = quest.count ?? 0;
+    const available = inventory?.[quest.target] ?? 0;
+    if (available < needCount) {
+      addNotification('庫存不足，無法完成交付。', { type: 'warning' });
+      return;
+    }
+
+    setInventory(prev => ({
+      ...prev,
+      [quest.target]: Math.max(0, (prev?.[quest.target] || 0) - needCount),
+    }));
+    setMoney(prev => prev + (quest.reward ?? 0));
+    setQuestLog(prev => ({
+      ...prev,
+      [questId]: {
+        ...prev[questId],
+        status: 'completed',
+        progress: needCount,
+        completedDay: day,
+      },
+    }));
+
+    const targetLabel = getQuestTargetLabel(quest);
+    addNotification(`🎁 已交付 ${needCount} 份${targetLabel}，獲得 $${quest.reward}！`, { type: 'success' });
+  }, [questDefinitions, questLog, inventory, setInventory, setMoney, setQuestLog, getQuestTargetLabel, addNotification, day]);
+
+  const claimQuestReward = useCallback((questId) => {
+    const quest = questDefinitions[questId];
+    if (!quest) {
+      return;
+    }
+
+    const entry = questLog[questId];
+    if (!entry) {
+      addNotification('請先接受任務！', { type: 'info' });
+      return;
+    }
+
+    if (entry.status !== 'ready') {
+      if (entry.status === 'completed') {
+        addNotification('任務獎勵已經領取過了。', { type: 'info' });
+      } else {
+        addNotification('仍未達成任務要求，持續加油！', { type: 'warning' });
+      }
+      return;
+    }
+
+    setMoney(prev => prev + (quest.reward ?? 0));
+    setQuestLog(prev => ({
+      ...prev,
+      [questId]: {
+        ...prev[questId],
+        status: 'completed',
+        progress: quest.count ?? prev[questId]?.progress ?? 0,
+        completedDay: day,
+      },
+    }));
+    addNotification(`💰 領取任務獎勵 $${quest.reward}！`, { type: 'success' });
+  }, [questDefinitions, questLog, setMoney, setQuestLog, addNotification, day]);
+
+  const activeQuests = useMemo(() => {
+    if (!questLog) {
+      return [];
+    }
+
+    return Object.entries(questLog)
+      .map(([questId, entry]) => {
+        const quest = questDefinitions[questId];
+        if (!quest || entry.status === 'completed') {
+          return null;
+        }
+
+        const required = quest.count ?? 0;
+        const inventoryCount = quest.type === 'deliver' ? (inventory?.[quest.target] ?? 0) : null;
+        const progress = quest.type === 'deliver'
+          ? Math.min(required, inventoryCount ?? 0)
+          : Math.min(required, entry.progress ?? 0);
+        const ready = entry.status === 'ready'
+          || (quest.type === 'deliver' && entry.status === 'accepted' && inventoryCount != null && inventoryCount >= required);
+
+        return {
+          id: questId,
+          quest,
+          entry,
+          progress,
+          required,
+          ready,
+          inventoryCount,
+        };
+      })
+      .filter(Boolean)
+      .sort((a, b) => {
+        if (a.ready === b.ready) {
+          return 0;
+        }
+        return a.ready ? -1 : 1;
+      });
+  }, [questLog, questDefinitions, inventory]);
 
   const marketInsights = useMemo(() => {
     const entries = Object.entries(CROPS).map(([key, crop]) => {
@@ -612,6 +869,39 @@ const FarmGame = () => {
               });
             });
 
+            let processedAnimals = updatedAnimals;
+            const outbreakVictims = [];
+            if (processedAnimals.length > 0 && Math.random() < 0.08) {
+              const healthyCandidates = processedAnimals.filter(candidate => !candidate.sick);
+              if (healthyCandidates.length > 0) {
+                const victimCount = Math.max(1, Math.ceil(healthyCandidates.length * 0.3));
+                const selectedIds = new Set();
+                while (selectedIds.size < Math.min(victimCount, healthyCandidates.length)) {
+                  const target = healthyCandidates[Math.floor(Math.random() * healthyCandidates.length)];
+                  selectedIds.add(target.id);
+                }
+
+                processedAnimals = processedAnimals.map(state => {
+                  if (selectedIds.has(state.id)) {
+                    const animalData = ANIMALS[state.type];
+                    const baseHappiness = state.happiness ?? animalData.happiness ?? 40;
+                    const baseHunger = state.hunger ?? 60;
+                    const adjusted = {
+                      ...state,
+                      sick: true,
+                      happiness: Math.max(0, baseHappiness - 20),
+                      hunger: Math.max(0, baseHunger - 25),
+                    };
+                    outbreakVictims.push(adjusted.name);
+                    newlySick.push(adjusted.name);
+                    sickAnimals.push(adjusted.name);
+                    return adjusted;
+                  }
+                  return state;
+                });
+              }
+            }
+
             if (totalIncome > 0) {
               setMoney(prevMoney => prevMoney + totalIncome);
               addNotification(`🐾 動物們帶來了 $${totalIncome} 的收入！`, { type: 'success' });
@@ -632,6 +922,11 @@ const FarmGame = () => {
               addNotification(`🤒 ${names} 身體不適，需要營養劑治療！`, { type: 'error' });
             }
 
+            if (outbreakVictims.length > 0) {
+              const names = Array.from(new Set(outbreakVictims)).join('、');
+              addNotification(`☠️ 農場爆發傳染病！${names} 情況危急，務必立即治療！`, { type: 'error' });
+            }
+
             const ongoingSick = Array.from(new Set(sickAnimals.filter(name => !newlySick.includes(name))));
             if (ongoingSick.length > 0) {
               addNotification(`💊 ${ongoingSick.join('、')} 仍在療養中，記得使用營養劑。`, { type: 'warning' });
@@ -642,7 +937,7 @@ const FarmGame = () => {
               addNotification(`🐣 ${names} 出生了，農場又更熱鬧了！`, { type: 'success' });
             }
 
-            return [...updatedAnimals, ...newbornAnimals];
+            return [...processedAnimals, ...newbornAnimals];
           });
 
           if (Object.keys(producedGoods).length > 0) {
@@ -665,6 +960,8 @@ const FarmGame = () => {
 
           const infestedCrops = [];
           const destroyedCrops = [];
+          const stormDamaged = [];
+          const blightInfected = [];
           const autoWatered = new Set();
           setFarm(prevFarm => {
             let changed = false;
@@ -735,7 +1032,68 @@ const FarmGame = () => {
               return updatedPlot;
             });
 
-            return changed ? nextFarm : prevFarm;
+            let processedFarm = nextFarm;
+
+            const vulnerableForStorm = processedFarm.filter(plot => plot.crop && !plot.greenhouse);
+            if (vulnerableForStorm.length > 0 && Math.random() < 0.12) {
+              const hits = Math.max(1, Math.ceil(vulnerableForStorm.length * 0.25));
+              const selectedIds = new Set();
+              while (selectedIds.size < Math.min(hits, vulnerableForStorm.length)) {
+                const target = vulnerableForStorm[Math.floor(Math.random() * vulnerableForStorm.length)];
+                selectedIds.add(target.id);
+              }
+
+              processedFarm = processedFarm.map(plot => {
+                if (selectedIds.has(plot.id)) {
+                  const cropInfo = plot.crop ? CROPS[plot.crop] : null;
+                  if (cropInfo) {
+                    stormDamaged.push(cropInfo.name);
+                  }
+                  changed = true;
+                  return {
+                    ...plot,
+                    crop: null,
+                    plantTime: null,
+                    watered: false,
+                    fertilized: false,
+                    pest: false,
+                    pestDays: 0,
+                    ready: false,
+                  };
+                }
+                return plot;
+              });
+            }
+
+            const vulnerableForBlight = processedFarm.filter(plot => plot.crop && !plot.greenhouse && !plot.ready && !plot.pest);
+            if (vulnerableForBlight.length > 0 && Math.random() < 0.09) {
+              const hits = Math.max(1, Math.ceil(vulnerableForBlight.length * 0.3));
+              const selectedIds = new Set();
+              while (selectedIds.size < Math.min(hits, vulnerableForBlight.length)) {
+                const target = vulnerableForBlight[Math.floor(Math.random() * vulnerableForBlight.length)];
+                selectedIds.add(target.id);
+              }
+
+              processedFarm = processedFarm.map(plot => {
+                if (selectedIds.has(plot.id)) {
+                  const cropInfo = plot.crop ? CROPS[plot.crop] : null;
+                  if (cropInfo) {
+                    blightInfected.push(cropInfo.name);
+                  }
+                  changed = true;
+                  return {
+                    ...plot,
+                    pest: true,
+                    pestDays: Math.max(2, (plot.pestDays ?? 0) + 2),
+                    watered: false,
+                    fertilized: false,
+                  };
+                }
+                return plot;
+              });
+            }
+
+            return changed ? processedFarm : prevFarm;
           });
 
           if (infestedCrops.length > 0) {
@@ -746,6 +1104,16 @@ const FarmGame = () => {
           if (destroyedCrops.length > 0) {
             const names = Array.from(new Set(destroyedCrops)).join('、');
             addNotification(`🥀 ${names} 因害蟲侵蝕而枯萎了……記得提早使用除蟲劑。`, { type: 'error' });
+          }
+
+          if (stormDamaged.length > 0) {
+            const names = Array.from(new Set(stormDamaged)).join('、');
+            addNotification(`⛈️ 暴風雨摧毀了 ${names}，未設溫室的作物損失慘重！`, { type: 'error' });
+          }
+
+          if (blightInfected.length > 0) {
+            const names = Array.from(new Set(blightInfected)).join('、');
+            addNotification(`🦠 ${names} 感染了作物病害，快使用除蟲劑或移入溫室！`, { type: 'warning' });
           }
 
           if (autoWatered.size > 0) {
@@ -1111,7 +1479,7 @@ const FarmGame = () => {
                   onClick={expandFarmPlots}
                   className="self-start sm:self-auto bg-green-500 hover:bg-green-600 text-white px-3 py-1 rounded transition-colors"
                 >
-                  擴建農地（{'$'}{nextFarmExpansionCost}）
+                  擴建農地（{'$'}{nextFarmExpansionCost} / +{FARM_EXPANSION_BATCH}格）
                 </button>
               ) : (
                 <span className="text-xs text-gray-500">農地已達最大規模</span>
@@ -1146,7 +1514,7 @@ const FarmGame = () => {
                     onClick={expandAnimalPens}
                     className="self-start sm:self-auto bg-blue-500 hover:bg-blue-600 text-white px-3 py-1 rounded transition-colors"
                   >
-                    擴建動物欄（{'$'}{nextAnimalExpansionCost}）
+                    擴建動物欄（{'$'}{nextAnimalExpansionCost} / +{ANIMAL_CAPACITY_STEP}格）
                   </button>
                 ) : (
                   <span className="text-xs text-gray-500">動物欄位已達上限</span>
@@ -1290,6 +1658,79 @@ const FarmGame = () => {
                   🌿 農務用品
                 </button>
               </div>
+            </div>
+
+            {/* 任務告示板 */}
+            <div className="bg-white bg-opacity-90 rounded-lg p-4 shadow-lg">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-lg font-bold flex items-center gap-2">
+                  <Target className="w-4 h-4 text-rose-600" />
+                  任務告示板
+                </h3>
+                <span className="text-xs text-gray-500">進行中 {activeQuests.length}</span>
+              </div>
+              {activeQuests.length > 0 ? (
+                <div className="space-y-2">
+                  {activeQuests.map(({ id, quest, entry, progress, required, ready, inventoryCount }) => {
+                    const badgeText = ready ? '可完成' : entry.status === 'accepted' ? '進行中' : '等待交付';
+                    const badgeClass = ready ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600';
+                    const targetLabel = getQuestTargetLabel(quest);
+                    const needsText = required > 0 ? `需求：${targetLabel} x${required}` : '';
+                    const progressText = required > 0
+                      ? quest.type === 'deliver'
+                        ? `庫存 ${inventoryCount ?? 0}/${required}`
+                        : `進度 ${progress}/${required}`
+                      : '';
+
+                    return (
+                      <div key={id} className="border border-rose-100 rounded-lg p-3 bg-rose-50/70">
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <p className="text-sm font-semibold text-rose-700 leading-snug">{quest.description}</p>
+                            <p className="text-xs text-gray-600 mt-1">獎勵 ${quest.reward}</p>
+                            {needsText && (
+                              <p className="text-xs text-gray-500 mt-1">{needsText}</p>
+                            )}
+                            {progressText && (
+                              <p className="text-xs text-gray-500">{progressText}</p>
+                            )}
+                          </div>
+                          <span className={`text-[11px] px-2 py-1 rounded-full ${badgeClass}`}>{badgeText}</span>
+                        </div>
+                        <div className="mt-2 flex justify-end">
+                          {quest.type === 'deliver' ? (
+                            <button
+                              onClick={() => deliverQuest(id)}
+                              disabled={!ready}
+                              className={`text-xs font-semibold px-3 py-1 rounded transition-colors ${ready
+                                ? 'bg-rose-500 text-white hover:bg-rose-600'
+                                : 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                              }`}
+                            >
+                              交付
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => claimQuestReward(id)}
+                              disabled={!ready}
+                              className={`text-xs font-semibold px-3 py-1 rounded transition-colors ${ready
+                                ? 'bg-emerald-500 text-white hover:bg-emerald-600'
+                                : 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                              }`}
+                            >
+                              領取獎勵
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <p className="text-sm text-gray-500">
+                  目前沒有進行中的任務，去和鄰居聊聊看看是否需要幫忙吧！
+                </p>
+              )}
             </div>
 
             {/* 市場價格 */}
@@ -1986,6 +2427,103 @@ const FarmGame = () => {
                 {currentNPC.dialogue[Math.floor(Math.random() * currentNPC.dialogue.length)]}
               </p>
             </div>
+            {currentNPC.quests && currentNPC.quests.length > 0 && (
+              <div className="mb-4 space-y-3">
+                <h3 className="text-sm font-semibold text-gray-700">可進行的任務</h3>
+                {currentNPC.quests.map(quest => {
+                  const log = questLog[quest.id] || null;
+                  const status = log?.status ?? 'available';
+                  const required = quest.count ?? 0;
+                  const inventoryCount = quest.type === 'deliver' ? (inventory?.[quest.target] ?? 0) : 0;
+                  const progress = quest.type === 'deliver'
+                    ? Math.min(required, inventoryCount)
+                    : Math.min(required, log?.progress ?? 0);
+                  const canDeliver = quest.type === 'deliver' && status === 'accepted' && inventoryCount >= required;
+                  const canClaim = status === 'ready';
+
+                  let badgeClass = 'bg-yellow-100 text-yellow-700';
+                  let statusLabel = '可接取';
+                  if (status === 'accepted') {
+                    if (canDeliver) {
+                      badgeClass = 'bg-green-100 text-green-700';
+                      statusLabel = '可交付';
+                    } else {
+                      badgeClass = 'bg-blue-100 text-blue-600';
+                      statusLabel = '進行中';
+                    }
+                  } else if (status === 'ready') {
+                    badgeClass = 'bg-green-100 text-green-700';
+                    statusLabel = '可領取';
+                  } else if (status === 'completed') {
+                    badgeClass = 'bg-gray-200 text-gray-600';
+                    statusLabel = '已完成';
+                  }
+
+                  const targetLabel = getQuestTargetLabel(quest);
+
+                  return (
+                    <div key={quest.id} className="border border-gray-200 rounded-lg p-3 bg-gray-50">
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <p className="text-sm font-semibold text-gray-800 leading-snug">{quest.description}</p>
+                          <p className="text-xs text-gray-600 mt-1">獎勵 ${quest.reward}</p>
+                          {required > 0 && (
+                            <p className="text-xs text-gray-500">需求：{targetLabel} x{required}</p>
+                          )}
+                          {required > 0 && (
+                            <p className="text-xs text-gray-500">
+                              {quest.type === 'deliver'
+                                ? `庫存 ${inventoryCount}/${required}`
+                                : `進度 ${progress}/${required}`}
+                            </p>
+                          )}
+                        </div>
+                        <span className={`text-[11px] px-2 py-1 rounded-full ${badgeClass}`}>{statusLabel}</span>
+                      </div>
+                      <div className="mt-2 flex justify-end gap-2">
+                        {status === 'available' && (
+                          <button
+                            onClick={() => acceptQuest(quest.id)}
+                            className="text-xs bg-blue-500 text-white px-3 py-1 rounded hover:bg-blue-600 transition-colors"
+                          >
+                            接受任務
+                          </button>
+                        )}
+                        {quest.type === 'deliver' && status === 'accepted' && (
+                          <button
+                            onClick={() => deliverQuest(quest.id)}
+                            disabled={!canDeliver}
+                            className={`text-xs px-3 py-1 rounded transition-colors ${canDeliver
+                              ? 'bg-rose-500 text-white hover:bg-rose-600'
+                              : 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                            }`}
+                          >
+                            立即交付
+                          </button>
+                        )}
+                        {quest.type === 'deliver' && status === 'completed' && (
+                          <span className="text-xs text-gray-500">感謝你的幫忙！</span>
+                        )}
+                        {quest.type !== 'deliver' && canClaim && (
+                          <button
+                            onClick={() => claimQuestReward(quest.id)}
+                            className="text-xs bg-emerald-500 text-white px-3 py-1 rounded hover:bg-emerald-600 transition-colors"
+                          >
+                            領取獎勵
+                          </button>
+                        )}
+                        {quest.type !== 'deliver' && status === 'accepted' && !canClaim && (
+                          <span className="text-xs text-gray-500">努力完成目標中…</span>
+                        )}
+                        {quest.type !== 'deliver' && status === 'completed' && (
+                          <span className="text-xs text-gray-500">任務已完成！</span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
             <button onClick={() => setShowNPCDialog(false)}
                     className="w-full bg-blue-500 hover:bg-blue-600 text-white py-2 px-4 rounded transition-colors">
               結束對話
