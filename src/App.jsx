@@ -31,7 +31,9 @@ const FarmGame = () => {
       watered: false,
       fertilized: false,
       greenhouse: false,
-      pest: false
+      pest: false,
+      pestDays: 0,
+      ready: false,
     }))
   );
 
@@ -316,6 +318,12 @@ const FarmGame = () => {
             const newlySick = [];
             const sickAnimals = [];
             const updatedAnimals = [];
+            const newbornAnimals = [];
+            const typeCounts = prevAnimals.reduce((counts, current) => {
+              const type = current.type;
+              counts[type] = (counts[type] || 0) + 1;
+              return counts;
+            }, {});
 
             prevAnimals.forEach(animal => {
               const animalData = ANIMALS[animal.type];
@@ -361,6 +369,27 @@ const FarmGame = () => {
                 : 0;
               totalIncome += income;
 
+              if (!sick && hunger >= 75 && happiness >= 75 && newbornAnimals.length < 3) {
+                const birthChance = 0.12
+                  + (happiness > 90 ? 0.05 : 0)
+                  + (hunger > 90 ? 0.05 : 0);
+                if (Math.random() < birthChance) {
+                  typeCounts[animal.type] = (typeCounts[animal.type] || 0) + 1;
+                  const baseName = animalData.name;
+                  const babyIndex = typeCounts[animal.type];
+                  const babyName = `${baseName}寶寶${babyIndex}`;
+                  newbornAnimals.push({
+                    id: Date.now() + newbornAnimals.length + Math.floor(Math.random() * 1000),
+                    type: animal.type,
+                    happiness: animalData.happiness,
+                    hunger: 65,
+                    lastFed: Date.now(),
+                    sick: false,
+                    name: babyName,
+                  });
+                }
+              }
+
               updatedAnimals.push({
                 ...animal,
                 happiness,
@@ -394,25 +423,77 @@ const FarmGame = () => {
               addNotification(`💊 ${ongoingSick.join('、')} 仍在療養中，記得使用營養劑。`, { type: 'warning' });
             }
 
-            return updatedAnimals;
+            if (newbornAnimals.length > 0) {
+              const names = newbornAnimals.map(animal => animal.name).join('、');
+              addNotification(`🐣 ${names} 出生了，農場又更熱鬧了！`, { type: 'success' });
+            }
+
+            return [...updatedAnimals, ...newbornAnimals];
           });
 
           const infestedCrops = [];
+          const destroyedCrops = [];
+          const autoWatered = new Set();
           setFarm(prevFarm => {
             let changed = false;
+            const hasSprinkler = buildings?.sprinkler;
             const nextFarm = prevFarm.map(plot => {
               let updatedPlot = plot;
 
-              if (plot.crop && !plot.ready && !plot.pest) {
-                const pestChance = plot.fertilized ? 0.05 : 0.12;
-                if (Math.random() < pestChance) {
-                  infestedCrops.push(CROPS[plot.crop].name);
-                  updatedPlot = { ...plot, pest: true };
+              if (plot.crop) {
+                const originalCrop = CROPS[plot.crop];
+                if (!plot.ready && !plot.pest) {
+                  const pestChance = plot.fertilized ? 0.05 : 0.12;
+                  if (Math.random() < pestChance) {
+                    if (originalCrop) {
+                      infestedCrops.push(originalCrop.name);
+                    }
+                    updatedPlot = { ...plot, pest: true, pestDays: 1 };
+                  }
                 }
-              }
 
-              if (!updatedPlot.crop && updatedPlot.fertilized) {
-                updatedPlot = { ...updatedPlot, fertilized: false };
+                if (updatedPlot.pest) {
+                  const currentDays = updatedPlot.pestDays ?? 0;
+                  const nextDays = currentDays + (plot.pest ? 1 : 0);
+                  if (!updatedPlot.ready && nextDays >= 3) {
+                    const damagedCrop = updatedPlot.crop ? CROPS[updatedPlot.crop] : null;
+                    if (damagedCrop) {
+                      destroyedCrops.push(damagedCrop.name);
+                    }
+                    updatedPlot = {
+                      ...updatedPlot,
+                      crop: null,
+                      plantTime: null,
+                      watered: false,
+                      fertilized: false,
+                      pest: false,
+                      pestDays: 0,
+                      ready: false,
+                    };
+                  } else if (nextDays !== currentDays) {
+                    updatedPlot = { ...updatedPlot, pestDays: nextDays };
+                  }
+                } else if (updatedPlot.pestDays) {
+                  updatedPlot = { ...updatedPlot, pestDays: 0 };
+                }
+
+                if (hasSprinkler && updatedPlot.crop && !updatedPlot.ready && !updatedPlot.watered) {
+                  const cropInfo = CROPS[updatedPlot.crop];
+                  updatedPlot = { ...updatedPlot, watered: true };
+                  if (cropInfo) {
+                    autoWatered.add(cropInfo.name);
+                  }
+                }
+              } else {
+                if (updatedPlot.fertilized || updatedPlot.pest || (updatedPlot.pestDays ?? 0) > 0 || updatedPlot.ready) {
+                  updatedPlot = {
+                    ...updatedPlot,
+                    fertilized: false,
+                    pest: false,
+                    pestDays: 0,
+                    ready: false,
+                  };
+                }
               }
 
               if (updatedPlot !== plot) {
@@ -428,6 +509,16 @@ const FarmGame = () => {
           if (infestedCrops.length > 0) {
             const names = Array.from(new Set(infestedCrops)).join('、');
             addNotification(`🐛 害蟲入侵！${names} 需要使用驅蟲劑。`, { type: 'warning' });
+          }
+
+          if (destroyedCrops.length > 0) {
+            const names = Array.from(new Set(destroyedCrops)).join('、');
+            addNotification(`🥀 ${names} 因害蟲侵蝕而枯萎了……記得提早使用除蟲劑。`, { type: 'error' });
+          }
+
+          if (autoWatered.size > 0) {
+            const names = Array.from(autoWatered).join('、');
+            addNotification(`🚿 自動灑水器已為 ${names} 補足水分。`, { type: 'info' });
           }
 
           return 6;

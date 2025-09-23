@@ -17,6 +17,8 @@ const createDefaultFarm = () =>
     fertilized: false,
     greenhouse: false,
     pest: false,
+    pestDays: 0,
+    ready: false,
   }));
 
 const createDefaultSupplies = () => ({
@@ -131,7 +133,20 @@ export class SaveManager {
     this.setters.setWeather(gameState.weather);
     this.setters.setWeatherDuration(gameState.weatherDuration || 5);
     this.setters.setInventory(gameState.inventory || createDefaultInventory());
-    this.setters.setFarm(Array.isArray(gameState.farm) ? gameState.farm : createDefaultFarm());
+    const sanitizedFarm = Array.isArray(gameState.farm)
+      ? gameState.farm.map((plot, index) => ({
+          id: plot.id ?? index,
+          crop: plot.crop ?? null,
+          plantTime: plot.plantTime ?? null,
+          watered: plot.crop ? Boolean(plot.watered) : false,
+          fertilized: Boolean(plot.fertilized),
+          greenhouse: Boolean(plot.greenhouse),
+          pest: Boolean(plot.pest),
+          pestDays: plot.pest ? (plot.pestDays ?? 1) : 0,
+          ready: plot.crop ? Boolean(plot.ready) : false,
+        }))
+      : createDefaultFarm();
+    this.setters.setFarm(sanitizedFarm);
     this.setters.setFarmSupplies(gameState.farmSupplies || createDefaultSupplies());
     const sanitizedAnimals = Array.isArray(gameState.animals)
       ? gameState.animals.map(animal => ({
@@ -142,7 +157,12 @@ export class SaveManager {
         }))
       : [];
     this.setters.setAnimals(sanitizedAnimals);
-    this.setters.setBuildings(gameState.buildings || {});
+    const normalizedBuildings = { ...(gameState.buildings || {}) };
+    if (normalizedBuildings.well) {
+      normalizedBuildings.sprinkler = true;
+      delete normalizedBuildings.well;
+    }
+    this.setters.setBuildings(normalizedBuildings);
     this.setters.setTools(gameState.tools || 'basic');
     this.setters.setCompletedAchievements(new Set(gameState.completedAchievements || []));
     this.setters.setDailyStats(gameState.dailyStats || []);

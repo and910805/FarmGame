@@ -134,7 +134,7 @@ export class GameEngine {
 
       this.setters.setFarm(prev => prev.map(p => (
         p.id === plotId
-          ? { ...p, pest: false }
+          ? { ...p, pest: false, pestDays: 0 }
           : p
       )));
       this.consumeSupply('pesticide', { keepSelection: available > 1 });
@@ -155,7 +155,7 @@ export class GameEngine {
       return;
     }
 
-    const energyCost = Math.max(1, 10 - TOOLS[tools].energyReduction - (buildings?.well ? 5 : 0));
+    const energyCost = Math.max(1, 10 - TOOLS[tools].energyReduction - (buildings?.sprinkler ? 5 : 0));
     if (energy < energyCost) {
       this.notify('體力不足！', { type: 'warning' });
       return;
@@ -165,7 +165,7 @@ export class GameEngine {
     this.setters.setFarm(prev => prev.map(plot => {
       if (plot.id === plotId && !plot.crop) {
         planted = true;
-        return { ...plot, crop: selectedSeed, plantTime: Date.now(), watered: false, ready: false, pest: false };
+        return { ...plot, crop: selectedSeed, plantTime: Date.now(), watered: false, ready: false, pest: false, pestDays: 0 };
       }
       return plot;
     }));
@@ -203,7 +203,7 @@ export class GameEngine {
     this.setters.setExperience(prev => prev + 10);
     this.setters.setFarm(prev => prev.map(p =>
       p.id === plotId
-        ? { ...p, crop: null, plantTime: null, watered: false, ready: false, pest: false, fertilized: false }
+        ? { ...p, crop: null, plantTime: null, watered: false, ready: false, pest: false, pestDays: 0, fertilized: false }
         : p
     ));
 
@@ -212,7 +212,7 @@ export class GameEngine {
 
   waterPlot(plotId) {
     const { energy, buildings } = this.state;
-    const energyCost = buildings?.well ? 2 : 5;
+    const energyCost = buildings?.sprinkler ? 1 : 5;
     if (energy < energyCost) {
       this.notify('體力不足，無法澆水！', { type: 'warning' });
       return;
@@ -271,9 +271,9 @@ export class GameEngine {
       this.setters.setBuildings(prev => ({ ...prev, [buildingType]: true }));
 
       if (buildingType === 'greenhouse') {
-        this.setters.setFarm(prev => prev.map((plot, index) =>
-          index < 5 ? { ...plot, greenhouse: true } : plot
-        ));
+        this.setters.setFarm(prev => prev.map(plot => (
+          plot.greenhouse ? plot : { ...plot, greenhouse: true }
+        )));
       }
 
       this.setters.setShowBuildingShop(false);

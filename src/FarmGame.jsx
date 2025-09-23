@@ -36,7 +36,7 @@ const BUILDINGS = {
   greenhouse:   { name: '溫室',      price: 2000, emoji: '🏢', description: '不受天氣影響的種植空間', boost: 1.5 },
   silo:         { name: '筒倉',      price: 800,  emoji: '🗼', description: '儲存更多作物',      boost: 1.0 },
   windmill:     { name: '風車',      price: 1500, emoji: '🌪️', description: '產生額外收入',      boost: 1.0 },
-  well:         { name: '水井',      price: 400,  emoji: '🕳️', description: '無限澆水，節省體力', boost: 1.0 },
+  sprinkler:    { name: '自動灑水器', price: 650,  emoji: '🚿', description: '每天自動澆灌作物，並降低澆水體力消耗', boost: 1.0 },
 }
 
 const WEATHER_TYPES = ['sunny', 'rainy', 'cloudy', 'storm', 'snow']
@@ -310,7 +310,7 @@ const FarmGame = () => {
   const plantSeed = (plotId) => {
     if (!selectedSeed) return
     if (seedBag[selectedSeed] <= 0) return addNotification('該種子庫存不足！')
-    const energyCost = buildings.well ? 5 : 10
+    const energyCost = buildings.sprinkler ? 5 : 10
     if (energy < energyCost) return addNotification('體力不足！')
 
     setFarm(prev => prev.map(p =>
@@ -361,7 +361,7 @@ const FarmGame = () => {
   }
 
   const waterPlot = (plotId) => {
-    const energyCost = buildings.well ? 2 : 5
+    const energyCost = buildings.sprinkler ? 1 : 5
     if (energy < energyCost) return addNotification('體力不足！')
     setFarm(prev => prev.map(p =>
       p.id === plotId && p.crop && !p.watered
@@ -393,8 +393,7 @@ const FarmGame = () => {
     setBuildings(b => ({ ...b, [buildingType]: true }))
 
     if (buildingType === 'greenhouse') {
-      // 前 5 格變成溫室地塊
-      setFarm(prev => prev.map((p, i) => i < 5 ? { ...p, greenhouse: true } : p))
+      setFarm(prev => prev.map(p => (p.greenhouse ? p : { ...p, greenhouse: true })))
     }
     setShowBuildingShop(false)
     addNotification(`建造了 ${BUILDINGS[buildingType].emoji} ${BUILDINGS[buildingType].name}！`)

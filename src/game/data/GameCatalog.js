@@ -115,7 +115,7 @@ class GameCatalog {
       greenhouse: new Building('greenhouse', { name: '溫室', price: 2000, emoji: '🏢', description: '不受天氣影響的種植空間', boost: 1.5 }),
       silo: new Building('silo', { name: '筒倉', price: 800, emoji: '🗼', description: '儲存更多作物', boost: 1.0 }),
       windmill: new Building('windmill', { name: '風車', price: 1500, emoji: '🌪️', description: '產生額外收入', boost: 1.0 }),
-      well: new Building('well', { name: '水井', price: 400, emoji: '🕳️', description: '無限澆水，節省體力', boost: 1.0 }),
+      sprinkler: new Building('sprinkler', { name: '自動灑水器', price: 650, emoji: '🚿', description: '每天早晨自動澆灌所有作物並減少澆水體力消耗', boost: 1.0 }),
     };
 
     this.supplies = {
