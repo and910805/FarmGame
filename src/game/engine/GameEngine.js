@@ -1,4 +1,4 @@
-import { CROPS, ANIMALS, BUILDINGS, TOOLS } from '../data/GameCatalog';
+import { CROPS, ANIMALS, BUILDINGS, TOOLS, FARM_SUPPLIES } from '../data/GameCatalog';
 
 export class GameEngine {
   constructor({ stateRef, setters, notifier }) {
@@ -17,23 +17,143 @@ export class GameEngine {
     }
   }
 
+  consumeSupply(supplyType, { keepSelection = false } = {}) {
+    this.setters.setFarmSupplies(prev => {
+      const previous = prev || {};
+      const current = previous[supplyType] || 0;
+      return { ...previous, [supplyType]: Math.max(0, current - 1) };
+    });
+
+    if (!keepSelection) {
+      this.setters.setSelectedSupply(null);
+    }
+  }
+
   buySeed(seedType) {
     const { money, marketPrices } = this.state;
     const price = (marketPrices && marketPrices[seedType]) || CROPS[seedType].price;
 
     if (money >= price) {
-      this.setters.setMoney(prev => prev - price);
+      this.setters.setSelectedSupply(null);
       this.setters.setSelectedSeed(seedType);
       this.setters.setShowShop(false);
-      this.notify(`購買了 ${CROPS[seedType].name} 種子！`, { type: 'success' });
+      this.notify(`準備種植 ${CROPS[seedType].name}，記得找到空地！`, { type: 'success' });
     } else {
       this.notify('金錢不足！', { type: 'error' });
     }
   }
 
+  buySupply(supplyType) {
+    const supply = FARM_SUPPLIES[supplyType];
+    if (!supply) return;
+
+    const { money } = this.state;
+    if (money < supply.price) {
+      this.notify('金錢不足，無法購買！', { type: 'error' });
+      return;
+    }
+
+    this.setters.setMoney(prev => prev - supply.price);
+    this.setters.setFarmSupplies(prev => {
+      const previous = prev || {};
+      return { ...previous, [supplyType]: (previous[supplyType] || 0) + 1 };
+    });
+    this.setters.setShowSupplyShop(false);
+    this.notify(`購買了 ${supply.emoji} ${supply.name}！`, { type: 'success' });
+  }
+
+  selectSupply(supplyType) {
+    if (!FARM_SUPPLIES[supplyType]) {
+      this.setters.setSelectedSupply(null);
+      return;
+    }
+
+    const { selectedSupply } = this.state;
+    if (selectedSupply === supplyType) {
+      this.setters.setSelectedSupply(null);
+      return;
+    }
+
+    this.setters.setSelectedSeed(null);
+    this.setters.setSelectedSupply(supplyType);
+    this.notify(`已選擇 ${FARM_SUPPLIES[supplyType].name}，點擊目標即可使用。`, { type: 'info' });
+  }
+
+  applySupply(plotId) {
+    const { selectedSupply, farm, farmSupplies } = this.state;
+    if (!selectedSupply) return false;
+
+    const supply = FARM_SUPPLIES[selectedSupply];
+    if (!supply) {
+      this.setters.setSelectedSupply(null);
+      return false;
+    }
+
+    if (selectedSupply === 'medicine') {
+      this.notify('營養劑需要在動物卡片上使用喔！', { type: 'info' });
+      this.setters.setSelectedSupply(null);
+      return false;
+    }
+
+    const plot = farm.find(p => p.id === plotId);
+    if (!plot) return false;
+
+    const available = farmSupplies?.[selectedSupply] || 0;
+    if (available <= 0) {
+      this.notify('用品不足，先去補貨吧！', { type: 'warning' });
+      this.setters.setSelectedSupply(null);
+      return true;
+    }
+
+    if (selectedSupply === 'fertilizer') {
+      if (plot.fertilized) {
+        this.notify('這塊土地的土壤已經肥沃了！', { type: 'info' });
+        return true;
+      }
+
+      if (plot.crop && plot.ready) {
+        this.notify('作物已成熟，無需再施肥！', { type: 'info' });
+        return true;
+      }
+
+      this.setters.setFarm(prev => prev.map(p => (
+        p.id === plotId
+          ? { ...p, fertilized: true }
+          : p
+      )));
+      this.consumeSupply('fertilizer', { keepSelection: available > 1 });
+      this.notify('施用了有機肥料，作物成長速度提升！', { type: 'success' });
+      return true;
+    }
+
+    if (selectedSupply === 'pesticide') {
+      if (!plot.pest) {
+        this.notify('這塊土地沒有害蟲。', { type: 'info' });
+        return true;
+      }
+
+      this.setters.setFarm(prev => prev.map(p => (
+        p.id === plotId
+          ? { ...p, pest: false }
+          : p
+      )));
+      this.consumeSupply('pesticide', { keepSelection: available > 1 });
+      this.notify('成功清除害蟲，作物恢復生長！', { type: 'success' });
+      return true;
+    }
+
+    return false;
+  }
+
   plantSeed(plotId) {
-    const { selectedSeed, tools, buildings, energy } = this.state;
+    const { selectedSeed, tools, buildings, energy, money, marketPrices } = this.state;
     if (!selectedSeed) return;
+
+    const price = (marketPrices && marketPrices[selectedSeed]) || CROPS[selectedSeed].price;
+    if (money < price) {
+      this.notify('金錢不足，無法種植！', { type: 'error' });
+      return;
+    }
 
     const energyCost = Math.max(1, 10 - TOOLS[tools].energyReduction - (buildings?.well ? 5 : 0));
     if (energy < energyCost) {
@@ -41,15 +161,25 @@ export class GameEngine {
       return;
     }
 
-    this.setters.setFarm(prev => prev.map(plot =>
-      plot.id === plotId && !plot.crop
-        ? { ...plot, crop: selectedSeed, plantTime: Date.now(), watered: false, ready: false, pest: false }
-        : plot
-    ));
+    let planted = false;
+    this.setters.setFarm(prev => prev.map(plot => {
+      if (plot.id === plotId && !plot.crop) {
+        planted = true;
+        return { ...plot, crop: selectedSeed, plantTime: Date.now(), watered: false, ready: false, pest: false };
+      }
+      return plot;
+    }));
 
+    if (!planted) {
+      this.notify('這塊土地已經有作物了！', { type: 'info' });
+      return;
+    }
+
+    this.setters.setMoney(prev => prev - price);
     this.setters.setEnergy(prev => Math.max(0, prev - energyCost));
     this.setters.setExperience(prev => prev + 5);
     this.setters.setSelectedSeed(null);
+    this.setters.setSelectedSupply(null);
     this.notify(`種植了 ${CROPS[selectedSeed].name}！`, { type: 'success' });
   }
 
@@ -73,7 +203,7 @@ export class GameEngine {
     this.setters.setExperience(prev => prev + 10);
     this.setters.setFarm(prev => prev.map(p =>
       p.id === plotId
-        ? { ...p, crop: null, plantTime: null, watered: false, ready: false, pest: false }
+        ? { ...p, crop: null, plantTime: null, watered: false, ready: false, pest: false, fertilized: false }
         : p
     ));
 
@@ -117,6 +247,7 @@ export class GameEngine {
         happiness: animal.happiness,
         hunger: 70,
         lastFed: Date.now(),
+        sick: false,
         name: `${animal.name}${prev.filter(a => a.type === animalType).length + 1}`,
       }]);
       this.setters.setShowAnimalShop(false);
@@ -197,6 +328,37 @@ export class GameEngine {
         : a
     ));
     this.notify(`餵食了 ${animal.name}！`, { type: 'success' });
+  }
+
+  treatAnimal(animalId) {
+    const { animals, farmSupplies } = this.state;
+    const animal = animals.find(a => a.id === animalId);
+    if (!animal) return;
+
+    const medicineCount = farmSupplies?.medicine || 0;
+    if (medicineCount <= 0) {
+      this.notify('沒有營養劑可用，記得先去補貨！', { type: 'warning' });
+      this.setters.setSelectedSupply(null);
+      return;
+    }
+
+    if (!animal.sick) {
+      this.notify(`${animal.name} 狀態良好，暫時不需要治療。`, { type: 'info' });
+      return;
+    }
+
+    this.setters.setAnimals(prev => prev.map(a =>
+      a.id === animalId
+        ? {
+            ...a,
+            sick: false,
+            happiness: Math.min(100, (a.happiness ?? ANIMALS[a.type].happiness) + 25),
+          }
+        : a
+    ));
+
+    this.consumeSupply('medicine', { keepSelection: medicineCount > 1 });
+    this.notify(`已替 ${animal.name} 使用營養劑，狀況好多了！`, { type: 'success' });
   }
 }
 

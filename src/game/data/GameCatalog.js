@@ -72,6 +72,16 @@ class NPC {
   }
 }
 
+class Supply extends BaseEntity {
+  constructor(key, { name, price, emoji, description }) {
+    super(key);
+    this.name = name;
+    this.price = price;
+    this.emoji = emoji;
+    this.description = description;
+  }
+}
+
 class GameCatalog {
   constructor() {
     this.crops = {
@@ -106,6 +116,27 @@ class GameCatalog {
       silo: new Building('silo', { name: '筒倉', price: 800, emoji: '🗼', description: '儲存更多作物', boost: 1.0 }),
       windmill: new Building('windmill', { name: '風車', price: 1500, emoji: '🌪️', description: '產生額外收入', boost: 1.0 }),
       well: new Building('well', { name: '水井', price: 400, emoji: '🕳️', description: '無限澆水，節省體力', boost: 1.0 }),
+    };
+
+    this.supplies = {
+      fertilizer: new Supply('fertilizer', {
+        name: '有機肥料',
+        price: 45,
+        emoji: '🌿',
+        description: '提升土壤品質，縮短作物成熟時間。',
+      }),
+      pesticide: new Supply('pesticide', {
+        name: '天然驅蟲劑',
+        price: 30,
+        emoji: '🪲',
+        description: '清除害蟲，讓作物恢復生長。',
+      }),
+      medicine: new Supply('medicine', {
+        name: '動物營養劑',
+        price: 55,
+        emoji: '💊',
+        description: '治療生病的動物並恢復部分快樂度。',
+      }),
     };
 
     this.tools = {
@@ -155,6 +186,10 @@ class GameCatalog {
   getTool(key) {
     return this.tools[key];
   }
+
+  getSupply(key) {
+    return this.supplies[key];
+  }
 }
 
 export const WEATHER_TYPES = ['sunny', 'rainy', 'cloudy', 'storm', 'snow'];
@@ -165,6 +200,7 @@ export const CROPS = catalog.crops;
 export const ANIMALS = catalog.animals;
 export const BUILDINGS = catalog.buildings;
 export const TOOLS = catalog.tools;
+export const FARM_SUPPLIES = catalog.supplies;
 export const ACHIEVEMENTS = catalog.achievements;
 export const NPCS = catalog.npcs;
 

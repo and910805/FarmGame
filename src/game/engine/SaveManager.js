@@ -19,6 +19,12 @@ const createDefaultFarm = () =>
     pest: false,
   }));
 
+const createDefaultSupplies = () => ({
+  fertilizer: 0,
+  pesticide: 0,
+  medicine: 0,
+});
+
 export class SaveManager {
   constructor({ stateRef, setters, notifier }) {
     this.stateRef = stateRef;
@@ -49,6 +55,7 @@ export class SaveManager {
       weatherDuration,
       inventory,
       farm,
+      farmSupplies,
       animals,
       buildings,
       tools,
@@ -56,6 +63,7 @@ export class SaveManager {
       dailyStats,
       automation,
       marketPrices,
+      selectedSupply,
     } = this.state;
 
     return {
@@ -70,6 +78,7 @@ export class SaveManager {
       weatherDuration,
       inventory,
       farm,
+      farmSupplies,
       animals,
       buildings,
       tools,
@@ -77,6 +86,7 @@ export class SaveManager {
       dailyStats,
       automation,
       marketPrices,
+      selectedSupply: selectedSupply || null,
       saveTime: new Date().toISOString(),
       version: '1.0',
     };
@@ -122,11 +132,13 @@ export class SaveManager {
     this.setters.setWeatherDuration(gameState.weatherDuration || 5);
     this.setters.setInventory(gameState.inventory || createDefaultInventory());
     this.setters.setFarm(Array.isArray(gameState.farm) ? gameState.farm : createDefaultFarm());
+    this.setters.setFarmSupplies(gameState.farmSupplies || createDefaultSupplies());
     const sanitizedAnimals = Array.isArray(gameState.animals)
       ? gameState.animals.map(animal => ({
           ...animal,
           happiness: animal.happiness ?? ANIMALS[animal.type]?.happiness ?? 50,
           hunger: animal.hunger ?? 60,
+          sick: animal.sick ?? false,
         }))
       : [];
     this.setters.setAnimals(sanitizedAnimals);
@@ -136,6 +148,7 @@ export class SaveManager {
     this.setters.setDailyStats(gameState.dailyStats || []);
     this.setters.setAutomation(gameState.automation || { autoWater: false, autoHarvest: false });
     this.setters.setMarketPrices(gameState.marketPrices || {});
+    this.setters.setSelectedSupply(gameState.selectedSupply || null);
   }
 
   exportSave() {
