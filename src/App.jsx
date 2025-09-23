@@ -1,72 +1,10 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Sprout, Coins, ShoppingCart, Heart, Home, Sun, Moon, Zap, Droplets, Hammer, Building, Star, Save, Trophy, Settings, MessageCircle, Target } from 'lucide-react';
-
-const CROPS = {
-  carrot: { name: '胡蘿蔔', price: 10, growTime: 5, sellPrice: 25, emoji: '🥕', weatherBonus: { sunny: 1.2, rainy: 1.0, snow: 0.8 } },
-  corn: { name: '玉米', price: 20, growTime: 8, sellPrice: 50, emoji: '🌽', weatherBonus: { sunny: 1.3, rainy: 1.1, snow: 0.6 } },
-  tomato: { name: '番茄', price: 15, growTime: 6, sellPrice: 35, emoji: '🍅', weatherBonus: { sunny: 1.4, rainy: 0.9, snow: 0.5 } },
-  wheat: { name: '小麥', price: 8, growTime: 4, sellPrice: 20, emoji: '🌾', weatherBonus: { sunny: 1.1, rainy: 1.2, snow: 0.9 } },
-  potato: { name: '馬鈴薯', price: 12, growTime: 7, sellPrice: 30, emoji: '🥔', weatherBonus: { sunny: 1.0, rainy: 1.3, snow: 1.1 } },
-  strawberry: { name: '草莓', price: 25, growTime: 10, sellPrice: 60, emoji: '🍓', weatherBonus: { sunny: 1.2, rainy: 0.8, snow: 0.4 } }
-};
-
-const ANIMALS = {
-  dog: { name: '狗狗', price: 200, happiness: 50, emoji: '🐕', foodCost: 5, income: 8, shelter: 'dogHouse' },
-  cat: { name: '貓咪', price: 150, happiness: 60, emoji: '🐱', foodCost: 3, income: 5, shelter: 'catHouse' },
-  chicken: { name: '雞', price: 100, happiness: 40, emoji: '🐔', foodCost: 2, income: 12, shelter: 'chickenCoop' },
-  cow: { name: '牛', price: 500, happiness: 30, emoji: '🐄', foodCost: 10, income: 25, shelter: 'barn' },
-  pig: { name: '豬', price: 300, happiness: 45, emoji: '🐷', foodCost: 8, income: 18, shelter: 'pigPen' },
-  sheep: { name: '羊', price: 250, happiness: 40, emoji: '🐑', foodCost: 6, income: 15, shelter: 'barn' },
-  duck: { name: '鴨子', price: 120, happiness: 55, emoji: '🦆', foodCost: 3, income: 10, shelter: 'pond' },
-  rabbit: { name: '兔子', price: 80, happiness: 70, emoji: '🐰', foodCost: 2, income: 6, shelter: 'rabbitHutch' }
-};
-
-const BUILDINGS = {
-  barn: { name: '穀倉', price: 1000, emoji: '🏚️', description: '容納牛羊，提升產量', boost: 1.2 },
-  chickenCoop: { name: '雞舍', price: 500, emoji: '🏠', description: '專門養雞，提升產蛋率', boost: 1.3 },
-  dogHouse: { name: '狗屋', price: 300, emoji: '🏘️', description: '狗狗的溫馨小窩', boost: 1.1 },
-  catHouse: { name: '貓屋', price: 250, emoji: '🏡', description: '貓咪的舒適居所', boost: 1.1 },
-  pigPen: { name: '豬圈', price: 400, emoji: '🏗️', description: '豬豬的泥土樂園', boost: 1.2 },
-  pond: { name: '池塘', price: 600, emoji: '🌊', description: '水鳥的天堂', boost: 1.3 },
-  rabbitHutch: { name: '兔籠', price: 200, emoji: '📦', description: '兔子的安全小屋', boost: 1.2 },
-  greenhouse: { name: '溫室', price: 2000, emoji: '🏢', description: '不受天氣影響的種植空間', boost: 1.5 },
-  silo: { name: '筒倉', price: 800, emoji: '🗼', description: '儲存更多作物', boost: 1.0 },
-  windmill: { name: '風車', price: 1500, emoji: '🌪️', description: '產生額外收入', boost: 1.0 },
-  well: { name: '水井', price: 400, emoji: '🕳️', description: '無限澆水，節省體力', boost: 1.0 }
-};
-
-const TOOLS = {
-  basic: { name: '基本工具', energyReduction: 0, speedBoost: 1, price: 0 },
-  iron: { name: '鐵製工具', energyReduction: 2, speedBoost: 1.2, price: 500 },
-  steel: { name: '鋼製工具', energyReduction: 4, speedBoost: 1.5, price: 1200 },
-  magic: { name: '魔法工具', energyReduction: 6, speedBoost: 2, price: 3000 }
-};
-
-const ACHIEVEMENTS = [
-  { id: 'firstPlant', name: '初次種植', description: '種下第一株作物', reward: 100, icon: '🌱' },
-  { id: 'richFarmer', name: '富豪農夫', description: '擁有10000金幣', reward: 500, icon: '💰' },
-  { id: 'animalLover', name: '動物愛好者', description: '擁有10隻動物', reward: 300, icon: '🐾' },
-  { id: 'builder', name: '建築大師', description: '建造5個建築', reward: 800, icon: '🏗️' },
-  { id: 'levelUp', name: '經驗老手', description: '達到等級10', reward: 1000, icon: '⭐' },
-  { id: 'weatherMaster', name: '天氣專家', description: '在所有天氣下收成作物', reward: 600, icon: '🌦️' }
-];
-
-const NPCS = [
-  { 
-    name: '農夫老張', 
-    emoji: '👨‍🌾', 
-    dialogue: ['今天天氣真好呢！', '記得給作物澆水哦！', '我這裡有些好種子...'],
-    quests: [{ type: 'plant', target: 'carrot', count: 5, reward: 200 }]
-  },
-  {
-    name: '商人小李',
-    emoji: '👨‍💼',
-    dialogue: ['生意興隆！', '需要什麼嗎？', '我有特價商品！'],
-    quests: [{ type: 'sell', target: 'tomato', count: 10, reward: 300 }]
-  }
-];
-
-const WEATHER_TYPES = ['sunny', 'rainy', 'cloudy', 'storm', 'snow'];
+import { CROPS, ANIMALS, BUILDINGS, TOOLS, ACHIEVEMENTS, NPCS, WEATHER_TYPES, SEASONS } from './game/data/GameCatalog';
+import { GameFormatter } from './game/utils/GameFormatter';
+import { GameEngine } from './game/engine/GameEngine';
+import { SaveManager } from './game/engine/SaveManager';
+import { NotificationCenter } from './game/engine/NotificationCenter';
 
 const FarmGame = () => {
   // 基本狀態
@@ -118,6 +56,11 @@ const FarmGame = () => {
   const [showLoadMenu, setShowLoadMenu] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
   const [notifications, setNotifications] = useState([]);
+
+  const notificationCenter = useMemo(() => new NotificationCenter(setNotifications), []);
+  const addNotification = useCallback((message) => {
+    notificationCenter.push(message);
+  }, [notificationCenter]);
   
   // 新功能狀態
   const [completedAchievements, setCompletedAchievements] = useState(new Set());
@@ -137,171 +80,109 @@ const FarmGame = () => {
   const [saveData, setSaveData] = useState('');
   const [loadData, setLoadData] = useState('');
 
-  const addNotification = useCallback((message) => {
-    const id = Date.now();
-    setNotifications(prev => [...prev, { id, message }]);
-    setTimeout(() => {
-      setNotifications(prev => prev.filter(n => n.id !== id));
-    }, 4000);
-  }, []);
+  const stateRef = useRef({});
 
-  // 存檔相關函數
+  stateRef.current = {
+    money,
+    energy,
+    level,
+    experience,
+    time,
+    day,
+    season,
+    weather,
+    weatherDuration,
+    inventory,
+    farm,
+    animals,
+    buildings,
+    tools,
+    completedAchievements,
+    dailyStats,
+    automation,
+    marketPrices,
+    saveSlots,
+    selectedSeed,
+    loadData,
+  };
+
+  const saveManager = useMemo(() => new SaveManager({
+    stateRef,
+    setters: {
+      setMoney,
+      setEnergy,
+      setLevel,
+      setExperience,
+      setTime,
+      setDay,
+      setSeason,
+      setWeather,
+      setWeatherDuration,
+      setInventory,
+      setFarm,
+      setAnimals,
+      setBuildings,
+      setTools,
+      setCompletedAchievements,
+      setDailyStats,
+      setAutomation,
+      setMarketPrices,
+      setSaveSlots,
+      setShowSaveMenu,
+      setShowLoadMenu,
+      setLoadData,
+      setSaveData,
+    },
+    notifier: addNotification,
+  }), [addNotification]);
+
+  const gameEngine = useMemo(() => new GameEngine({
+    stateRef,
+    setters: {
+      setMoney,
+      setSelectedSeed,
+      setShowShop,
+      setFarm,
+      setEnergy,
+      setExperience,
+      setInventory,
+      setAnimals,
+      setShowAnimalShop,
+      setBuildings,
+      setShowBuildingShop,
+      setTools,
+      setShowToolShop,
+    },
+    notifier: addNotification,
+  }), [addNotification]);
+
   const saveToSlot = useCallback((slotName) => {
-    const gameState = {
-      money,
-      energy,
-      level,
-      experience,
-      time,
-      day,
-      season,
-      weather,
-      weatherDuration,
-      inventory,
-      farm,
-      animals,
-      buildings,
-      tools,
-      completedAchievements: Array.from(completedAchievements),
-      dailyStats,
-      automation,
-      marketPrices,
-      saveTime: new Date().toISOString(),
-      version: '1.0'
-    };
-    
-    setSaveSlots(prev => ({
-      ...prev,
-      [slotName]: gameState
-    }));
-    
-    addNotification(`遊戲已保存到存檔槽 ${slotName.slice(-1)}！`);
-    setShowSaveMenu(false);
-  }, [money, energy, level, experience, time, day, season, weather, weatherDuration, inventory, farm, animals, buildings, tools, completedAchievements, dailyStats, automation, marketPrices, addNotification]);
+    saveManager.saveToSlot(slotName);
+  }, [saveManager]);
 
   const loadFromSlot = useCallback((slotName) => {
-    const gameState = saveSlots[slotName];
-    if (!gameState) {
-      addNotification('存檔槽為空！');
-      return;
-    }
-
-    try {
-      setMoney(gameState.money);
-      setEnergy(gameState.energy);
-      setLevel(gameState.level);
-      setExperience(gameState.experience);
-      setTime(gameState.time);
-      setDay(gameState.day);
-      setSeason(gameState.season);
-      setWeather(gameState.weather);
-      setWeatherDuration(gameState.weatherDuration);
-      setInventory(gameState.inventory);
-      setFarm(gameState.farm);
-      setAnimals(gameState.animals);
-      setBuildings(gameState.buildings);
-      setTools(gameState.tools);
-      setCompletedAchievements(new Set(gameState.completedAchievements || []));
-      setDailyStats(gameState.dailyStats || []);
-      setAutomation(gameState.automation || { autoWater: false, autoHarvest: false });
-      setMarketPrices(gameState.marketPrices || {});
-
-      addNotification(`存檔槽 ${slotName.slice(-1)} 載入成功！`);
-      setShowLoadMenu(false);
-    } catch (error) {
-      addNotification('載入存檔失敗！存檔可能已損壞。');
-    }
-  }, [saveSlots, addNotification]);
+    saveManager.loadFromSlot(slotName);
+  }, [saveManager]);
 
   const exportSave = useCallback(() => {
-    const gameState = {
-      money,
-      energy,
-      level,
-      experience,
-      time,
-      day,
-      season,
-      weather,
-      weatherDuration,
-      inventory,
-      farm,
-      animals,
-      buildings,
-      tools,
-      completedAchievements: Array.from(completedAchievements),
-      dailyStats,
-      automation,
-      marketPrices,
-      saveTime: new Date().toISOString(),
-      version: '1.0'
-    };
-    
-    const saveString = JSON.stringify(gameState, null, 2);
-    setSaveData(saveString);
-    addNotification('存檔數據已生成！請複製保存。');
-  }, [money, energy, level, experience, time, day, season, weather, weatherDuration, inventory, farm, animals, buildings, tools, completedAchievements, dailyStats, automation, marketPrices, addNotification]);
+    saveManager.exportSave();
+  }, [saveManager]);
 
   const importSave = useCallback(() => {
-    if (!loadData.trim()) {
-      addNotification('請先輸入存檔數據！');
-      return;
-    }
-
-    try {
-      const gameState = JSON.parse(loadData);
-      
-      // 驗證存檔格式
-      if (!gameState.version || gameState.money === undefined) {
-        throw new Error('無效的存檔格式');
-      }
-
-      setMoney(gameState.money);
-      setEnergy(gameState.energy);
-      setLevel(gameState.level);
-      setExperience(gameState.experience);
-      setTime(gameState.time);
-      setDay(gameState.day);
-      setSeason(gameState.season);
-      setWeather(gameState.weather);
-      setWeatherDuration(gameState.weatherDuration || 5);
-      setInventory(gameState.inventory);
-      setFarm(gameState.farm);
-      setAnimals(gameState.animals);
-      setBuildings(gameState.buildings);
-      setTools(gameState.tools);
-      setCompletedAchievements(new Set(gameState.completedAchievements || []));
-      setDailyStats(gameState.dailyStats || []);
-      setAutomation(gameState.automation || { autoWater: false, autoHarvest: false });
-      setMarketPrices(gameState.marketPrices || {});
-
-      addNotification('存檔載入成功！');
-      setLoadData('');
-      setShowLoadMenu(false);
-    } catch (error) {
-      addNotification('載入失敗！請檢查存檔數據格式。');
-    }
-  }, [loadData, addNotification]);
+    saveManager.importSave();
+  }, [saveManager]);
 
   const deleteSaveSlot = useCallback((slotName) => {
-    setSaveSlots(prev => ({
-      ...prev,
-      [slotName]: null
-    }));
-    addNotification(`存檔槽 ${slotName.slice(-1)} 已刪除！`);
-  }, [addNotification]);
+    saveManager.deleteSaveSlot(slotName);
+  }, [saveManager]);
 
   const quickSave = useCallback(() => {
-    saveToSlot('slot1');
-  }, [saveToSlot]);
+    saveManager.quickSave();
+  }, [saveManager]);
 
   const quickLoad = useCallback(() => {
-    if (saveSlots.slot1) {
-      loadFromSlot('slot1');
-    } else {
-      addNotification('快速存檔槽為空！');
-    }
-  }, [loadFromSlot, saveSlots.slot1, addNotification]);
+    saveManager.quickLoad();
+  }, [saveManager]);
 
   // AI顧問系統
   useEffect(() => {
@@ -387,11 +268,10 @@ const FarmGame = () => {
           setDay(prevDay => {
             const newDay = prevDay + 1;
             if (newDay % 30 === 0) {
-              const seasons = ['spring', 'summer', 'autumn', 'winter'];
-              const currentSeasonIndex = seasons.indexOf(season);
-              const nextSeason = seasons[(currentSeasonIndex + 1) % 4];
+              const currentSeasonIndex = SEASONS.indexOf(season);
+              const nextSeason = SEASONS[(currentSeasonIndex + 1) % SEASONS.length];
               setSeason(nextSeason);
-              addNotification(`🌸 季節變為 ${getSeasonName(nextSeason)}！`);
+              addNotification(`🌸 季節變為 ${GameFormatter.seasonName(nextSeason)}！`);
             }
             return newDay;
           });
@@ -430,7 +310,7 @@ const FarmGame = () => {
         if (prev <= 0) {
           const newWeather = WEATHER_TYPES[Math.floor(Math.random() * WEATHER_TYPES.length)];
           setWeather(newWeather);
-          addNotification(`天氣變為 ${getWeatherName(newWeather)} ${getWeatherIcon(newWeather)}`);
+          addNotification(`天氣變為 ${GameFormatter.weatherName(newWeather)} ${GameFormatter.weatherIcon(newWeather)}`);
           return Math.floor(Math.random() * 8) + 3;
         }
         return prev - 1;
@@ -479,152 +359,37 @@ const FarmGame = () => {
     }
   }, [experience, level, addNotification]);
 
-  const getWeatherName = (weatherType) => {
-    const names = {
-      sunny: '晴天', rainy: '雨天', cloudy: '陰天', 
-      storm: '暴風雨', snow: '雪天'
-    };
-    return names[weatherType];
-  };
+  const buySeed = useCallback((seedType) => {
+    gameEngine.buySeed(seedType);
+  }, [gameEngine]);
 
-  const getSeasonName = (seasonType) => {
-    const names = {
-      spring: '春天', summer: '夏天', autumn: '秋天', winter: '冬天'
-    };
-    return names[seasonType];
-  };
+  const plantSeed = useCallback((plotId) => {
+    gameEngine.plantSeed(plotId);
+  }, [gameEngine]);
 
-  const buySeed = (seedType) => {
-    const price = marketPrices[seedType] || CROPS[seedType].price;
-    if (money >= price) {
-      setMoney(prev => prev - price);
-      setSelectedSeed(seedType);
-      setShowShop(false);
-      addNotification(`購買了 ${CROPS[seedType].name} 種子！`);
-    } else {
-      addNotification('金錢不足！');
-    }
-  };
+  const harvestCrop = useCallback((plotId) => {
+    gameEngine.harvestCrop(plotId);
+  }, [gameEngine]);
 
-  const plantSeed = (plotId) => {
-    if (!selectedSeed) return;
-    
-    const energyCost = Math.max(1, 10 - TOOLS[tools].energyReduction - (buildings.well ? 5 : 0));
-    if (energy < energyCost) {
-      addNotification('體力不足！');
-      return;
-    }
-    
-    setFarm(prev => prev.map(plot => 
-      plot.id === plotId && !plot.crop
-        ? { ...plot, crop: selectedSeed, plantTime: Date.now(), watered: false, ready: false, pest: false }
-        : plot
-    ));
-    
-    setEnergy(prev => Math.max(0, prev - energyCost));
-    setExperience(prev => prev + 5);
-    setSelectedSeed(null);
-    addNotification(`種植了 ${CROPS[selectedSeed].name}！`);
-  };
+  const waterPlot = useCallback((plotId) => {
+    gameEngine.waterPlot(plotId);
+  }, [gameEngine]);
 
-  const harvestCrop = (plotId) => {
-    const plot = farm.find(p => p.id === plotId);
-    if (!plot || !plot.ready) return;
+  const buyAnimal = useCallback((animalType) => {
+    gameEngine.buyAnimal(animalType);
+  }, [gameEngine]);
 
-    const crop = plot.crop;
-    const basePrice = marketPrices[crop] || CROPS[crop].sellPrice;
-    
-    let bonus = 1;
-    if (plot.watered) bonus *= 1.2;
-    if (plot.greenhouse) bonus *= 1.5;
-    if (buildings.silo) bonus *= 1.1;
-    
-    const sellPrice = Math.floor(basePrice * bonus);
-    
-    setMoney(prev => prev + sellPrice);
-    setInventory(prev => ({ ...prev, [crop]: prev[crop] + 1 }));
-    setExperience(prev => prev + 10);
-    
-    setFarm(prev => prev.map(plot => 
-      plot.id === plotId 
-        ? { ...plot, crop: null, plantTime: null, watered: false, ready: false, pest: false }
-        : plot
-    ));
+  const buyBuilding = useCallback((buildingType) => {
+    gameEngine.buyBuilding(buildingType);
+  }, [gameEngine]);
 
-    addNotification(`收成了 ${CROPS[crop].emoji}！獲得 $${sellPrice}`);
-  };
+  const buyTool = useCallback((toolType) => {
+    gameEngine.buyTool(toolType);
+  }, [gameEngine]);
 
-  const waterPlot = (plotId) => {
-    const energyCost = buildings.well ? 2 : 5;
-    if (energy < energyCost) return;
-    
-    setFarm(prev => prev.map(plot => 
-      plot.id === plotId && plot.crop && !plot.watered
-        ? { ...plot, watered: true }
-        : plot
-    ));
-    
-    setEnergy(prev => Math.max(0, prev - energyCost));
-    addNotification('澆水完成！');
-  };
-
-  const buyAnimal = (animalType) => {
-    if (money >= ANIMALS[animalType].price) {
-      setMoney(prev => prev - ANIMALS[animalType].price);
-      setAnimals(prev => [...prev, {
-        id: Date.now(),
-        type: animalType,
-        happiness: ANIMALS[animalType].happiness,
-        name: ANIMALS[animalType].name + (prev.filter(a => a.type === animalType).length + 1)
-      }]);
-      setShowAnimalShop(false);
-      addNotification(`購買了 ${ANIMALS[animalType].emoji} ${ANIMALS[animalType].name}！`);
-    } else {
-      addNotification('金錢不足！');
-    }
-  };
-
-  const buyBuilding = (buildingType) => {
-    if (money >= BUILDINGS[buildingType].price && !buildings[buildingType]) {
-      setMoney(prev => prev - BUILDINGS[buildingType].price);
-      setBuildings(prev => ({ ...prev, [buildingType]: true }));
-      
-      if (buildingType === 'greenhouse') {
-        setFarm(prev => prev.map((plot, index) => 
-          index < 5 ? { ...plot, greenhouse: true } : plot
-        ));
-      }
-      
-      setShowBuildingShop(false);
-      addNotification(`建造了 ${BUILDINGS[buildingType].emoji} ${BUILDINGS[buildingType].name}！`);
-    } else if (buildings[buildingType]) {
-      addNotification('已經擁有此建築！');
-    } else {
-      addNotification('金錢不足！');
-    }
-  };
-
-  const buyTool = (toolType) => {
-    if (money >= TOOLS[toolType].price && tools !== toolType) {
-      setMoney(prev => prev - TOOLS[toolType].price);
-      setTools(toolType);
-      setShowToolShop(false);
-      addNotification(`升級工具：${TOOLS[toolType].name}！`);
-    }
-  };
-
-  const feedAnimal = (animalId) => {
-    const animal = animals.find(a => a.id === animalId);
-    if (!animal || money < ANIMALS[animal.type].foodCost) return;
-
-    setMoney(prev => prev - ANIMALS[animal.type].foodCost);
-    setAnimals(prev => prev.map(a => 
-      a.id === animalId 
-        ? { ...a, happiness: Math.min(100, a.happiness + 25) }
-        : a
-    ));
-    addNotification(`餵食了 ${animal.name}！快樂度 +25`);
-  };
+  const feedAnimal = useCallback((animalId) => {
+    gameEngine.feedAnimal(animalId);
+  }, [gameEngine]);
 
   const interactNPC = (npc) => {
     setCurrentNPC(npc);
@@ -634,16 +399,6 @@ const FarmGame = () => {
   const getTimeIcon = () => {
     if (time >= 6 && time < 18) return <Sun className="w-5 h-5 text-yellow-400" />;
     return <Moon className="w-5 h-5 text-blue-300" />;
-  };
-
-  const getWeatherIcon = (weatherType = weather) => {
-    switch (weatherType) {
-      case 'rainy': return '🌧️';
-      case 'cloudy': return '☁️';
-      case 'storm': return '⛈️';
-      case 'snow': return '❄️';
-      default: return '☀️';
-    }
   };
 
   const isNight = time < 6 || time >= 18;
@@ -714,7 +469,7 @@ const FarmGame = () => {
             {getTimeIcon()}
             <span>{time}:00</span>
           </div>
-          <span>{getWeatherIcon()}</span>
+          <span>{GameFormatter.weatherIcon(weather)}</span>
           <span>第{day}天</span>
         </div>
       </div>
@@ -726,7 +481,7 @@ const FarmGame = () => {
           <div className="lg:col-span-3 bg-white bg-opacity-90 rounded-lg p-4 shadow-lg">
             <h2 className="text-xl font-bold mb-4 flex items-center">
               <Home className="mr-2" />
-              我的農場 - {getSeasonName(season)} {getWeatherName(weather)}
+              我的農場 - {GameFormatter.seasonName(season)} {GameFormatter.weatherName(weather)}
             </h2>
             
             {/* NPC區域 */}
