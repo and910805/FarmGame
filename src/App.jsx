@@ -113,6 +113,7 @@ const FarmGame = () => {
   const [showStats, setShowStats] = useState(false);
   const [showSaveMenu, setShowSaveMenu] = useState(false);
   const [showLoadMenu, setShowLoadMenu] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
   const [notifications, setNotifications] = useState([]);
   
   // 新功能狀態
@@ -697,6 +698,10 @@ const FarmGame = () => {
                   className="bg-yellow-500 hover:bg-yellow-600 text-white px-2 py-1 rounded text-xs transition-colors">
             ⚡ 快存
           </button>
+          <button onClick={() => setShowHelp(true)}
+                  className="bg-indigo-500 hover:bg-indigo-600 text-white px-2 py-1 rounded text-xs transition-colors">
+            📖 說明
+          </button>
           <div className="flex items-center space-x-1 ml-4">
             {getTimeIcon()}
             <span>{time}:00</span>
@@ -931,6 +936,95 @@ const FarmGame = () => {
           </div>
         </div>
       </div>
+
+      {/* 說明書模態框 */}
+      {showHelp && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 max-w-3xl w-full mx-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-bold flex items-center text-green-700">
+                <span className="text-2xl mr-2">📖</span>
+                玩家說明書
+              </h2>
+              <button onClick={() => setShowHelp(false)} className="text-gray-500 hover:text-gray-700">✕</button>
+            </div>
+            <div className="space-y-6 text-sm text-gray-700 leading-relaxed">
+              <section>
+                <h3 className="font-semibold text-lg text-green-600">🎯 遊戲目標</h3>
+                <p className="mt-2">賺取金幣、升級等級，打造屬於自己的夢幻農場。每天記得照顧作物和動物，累積資源就能解鎖更多功能。</p>
+              </section>
+              <section>
+                <h3 className="font-semibold text-lg text-yellow-600">💰 金錢怎麼賺、怎麼花</h3>
+                <ul className="list-disc pl-5 space-y-1 mt-2">
+                  <li>初始資金：500 金幣。</li>
+                  <li>收入來源：收成作物、動物每日產出、完成任務或成就。</li>
+                  <li>支出項目：購買種子、動物、建築、工具，以及每天的飼料費。</li>
+                  <li>市場價格會波動，記得低買高賣，賺得更快。</li>
+                </ul>
+              </section>
+              <section>
+                <h3 className="font-semibold text-lg text-emerald-600">🌱 作物入門</h3>
+                <ul className="list-disc pl-5 space-y-1 mt-2">
+                  <li>到「種子商店」買種子，在農田空格種下會消耗體力。</li>
+                  <li>不同作物有不同成長時間，天氣與工具等級會改變速度。</li>
+                  <li>澆水、在溫室種植或擁有筒倉，都能提高售價。</li>
+                  <li>例子：玉米基準價 $50，若有澆水（+20%）又在溫室（+50%），收成價約可達 $90。</li>
+                </ul>
+              </section>
+              <section>
+                <h3 className="font-semibold text-lg text-orange-500">🐾 照顧動物</h3>
+                <ul className="list-disc pl-5 space-y-1 mt-2">
+                  <li>在「動物商店」購買，部分動物需要先蓋對應建築。</li>
+                  <li>每天餵食會扣飼料費，但能維持快樂度（最高 100）。</li>
+                  <li>快樂度越高，產出的金幣越多；建築會提供額外加成。</li>
+                </ul>
+              </section>
+              <section>
+                <h3 className="font-semibold text-lg text-blue-600">🏠 建築與工具</h3>
+                <ul className="list-disc pl-5 space-y-1 mt-2">
+                  <li>建築能提升產量或帶來特殊效果，例如溫室免受天氣影響、筒倉賣價 +10%。</li>
+                  <li>工具分四個等級，等級越高越省體力、作物長得越快。</li>
+                </ul>
+              </section>
+              <section>
+                <h3 className="font-semibold text-lg text-sky-600">⚡ 體力、天氣與季節</h3>
+                <ul className="list-disc pl-5 space-y-1 mt-2">
+                  <li>每日體力上限 100，種植、澆水等行動會消耗體力。</li>
+                  <li>雨天會自動澆水，晴天適合日照作物，雪天則要小心成長變慢。</li>
+                  <li>每 30 天進入新季節（春→夏→秋→冬），部分作物或動物在特定季節表現更好。</li>
+                </ul>
+              </section>
+              <section>
+                <h3 className="font-semibold text-lg text-purple-600">🏆 成就、任務與顧問</h3>
+                <ul className="list-disc pl-5 space-y-1 mt-2">
+                  <li>完成成就可拿到獎勵金幣，例如第一次種植、養滿 10 隻動物等。</li>
+                  <li>和 NPC（農夫老張、商人小李）對話，可接到簡單任務換獎勵。</li>
+                  <li>AI 顧問會依照天氣、金錢或體力提醒下一步策略。</li>
+                </ul>
+              </section>
+              <section>
+                <h3 className="font-semibold text-lg text-rose-600">💾 存檔小幫手</h3>
+                <ul className="list-disc pl-5 space-y-1 mt-2">
+                  <li>共有五個存檔槽位，可手動保存，也能使用⚡快存快速備份。</li>
+                  <li>支援導出與導入存檔，想備份或分享農場都沒問題。</li>
+                </ul>
+              </section>
+              <section>
+                <h3 className="font-semibold text-lg text-gray-700">✨ 新手暖心提醒</h3>
+                <ul className="list-disc pl-5 space-y-1 mt-2">
+                  <li>先從便宜的作物與動物開始，穩定現金流後再投資大型建築。</li>
+                  <li>體力不足就先休息或升級工具，避免行動被卡住。</li>
+                  <li>時常查看市場價格與天氣，掌握好時機更容易發大財！</li>
+                </ul>
+              </section>
+            </div>
+            <button onClick={() => setShowHelp(false)}
+                    className="mt-6 w-full bg-indigo-500 hover:bg-indigo-600 text-white py-2 px-4 rounded transition-colors">
+              了解了！
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* 種子商店模態框 */}
       {showShop && (
