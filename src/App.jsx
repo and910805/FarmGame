@@ -77,6 +77,10 @@ const FarmGame = () => {
   const [showLoadMenu, setShowLoadMenu] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
   const [notifications, setNotifications] = useState([]);
+  const [pendingGreenhousePlacement, setPendingGreenhousePlacement] = useState(false);
+  const [marketView, setMarketView] = useState('summary');
+  const [marketListSort, setMarketListSort] = useState('price');
+  const [inventorySortMode, setInventorySortMode] = useState('value');
 
   const notificationCenter = useMemo(() => new NotificationCenter(setNotifications), []);
   const addNotification = useCallback((message, options) => {
@@ -148,6 +152,10 @@ const FarmGame = () => {
     selectedSeed,
     selectedSupply,
     loadData,
+    pendingGreenhousePlacement,
+    marketView,
+    marketListSort,
+    inventorySortMode,
   };
 
   const saveManager = useMemo(() => new SaveManager({
@@ -183,6 +191,7 @@ const FarmGame = () => {
       setSelectedSeed,
       setSelectedSupply,
       setShowSupplyShop,
+      setPendingGreenhousePlacement,
     },
     notifier: addNotification,
   }), [addNotification]);
@@ -207,6 +216,7 @@ const FarmGame = () => {
       setShowBuildingShop,
       setTools,
       setShowToolShop,
+      setPendingGreenhousePlacement,
     },
     notifier: addNotification,
   }), [stateRef, addNotification]);
@@ -289,7 +299,15 @@ const FarmGame = () => {
       });
     });
 
-    const sortedItems = items.sort((a, b) => {
+    const sortedItems = [...items];
+    sortedItems.sort((a, b) => {
+      if (inventorySortMode === 'count') {
+        if (b.count === a.count) {
+          return b.totalValue - a.totalValue;
+        }
+        return b.count - a.count;
+      }
+
       if (b.totalValue === a.totalValue) {
         return b.count - a.count;
       }
@@ -313,7 +331,50 @@ const FarmGame = () => {
       totalCount: safeTotalCount,
       totalValue: Math.round(safeTotalValue),
     };
-  }, [inventory, gameEngine, animals, buildings, marketPrices]);
+  }, [inventory, gameEngine, animals, buildings, marketPrices, inventorySortMode]);
+
+  const buildingEntries = useMemo(() => {
+    if (!buildings) {
+      return [];
+    }
+
+    return Object.entries(buildings)
+      .filter(([key, value]) => {
+        if (!BUILDINGS[key]) {
+          return false;
+        }
+
+        if (typeof value === 'number') {
+          return value > 0;
+        }
+
+        return Boolean(value);
+      })
+      .map(([key, value]) => ({
+        key,
+        value,
+        meta: BUILDINGS[key],
+        count: typeof value === 'number' ? value : null,
+      }));
+  }, [buildings]);
+
+  const sortedMarketEntries = useMemo(() => {
+    const baseEntries = marketInsights.entries ? [...marketInsights.entries] : [];
+
+    switch (marketListSort) {
+      case 'premium':
+        baseEntries.sort((a, b) => (b.percentFromBase ?? 0) - (a.percentFromBase ?? 0));
+        break;
+      case 'change':
+        baseEntries.sort((a, b) => (b.changeFromPrevious ?? 0) - (a.changeFromPrevious ?? 0));
+        break;
+      default:
+        baseEntries.sort((a, b) => b.price - a.price);
+        break;
+    }
+
+    return baseEntries;
+  }, [marketInsights.entries, marketListSort]);
 
   const saveToSlot = useCallback((slotName) => {
     saveManager.saveToSlot(slotName);
@@ -815,6 +876,8 @@ const FarmGame = () => {
 
   const applySupply = useCallback((plotId) => gameEngine.applySupply(plotId), [gameEngine]);
 
+  const placeGreenhouse = useCallback((plotId) => gameEngine.placeGreenhouse(plotId), [gameEngine]);
+
   const treatAnimal = useCallback((animalId) => {
     gameEngine.treatAnimal(animalId);
   }, [gameEngine]);
@@ -947,61 +1010,97 @@ const FarmGame = () => {
             </div>
             
             {/* 農場格子 */}
+            {pendingGreenhousePlacement && (
+              <div className="mb-3 rounded-lg border border-teal-300 bg-teal-50 px-3 py-2 text-sm text-teal-700 flex items-center gap-2">
+                <Building className="w-4 h-4" />
+                已購買溫室模組，請點選一格尚未設置溫室的農地完成建造。
+              </div>
+            )}
             <div className="grid grid-cols-5 gap-2 mb-4">
-              {farm.map((plot) => (
-                <div key={plot.id}
-                     className={`aspect-square border-2 rounded-lg cursor-pointer transition-all duration-300 hover:scale-105 relative ${
-                       plot.greenhouse ? 'border-green-600 bg-green-50' :
-                       plot.crop
-                         ? plot.ready
-                           ? 'bg-green-200 border-green-400 animate-pulse'
-                           : 'bg-yellow-100 border-yellow-400'
-                         : 'bg-gray-100 border-gray-300 hover:bg-green-50'
-                     }`}
-                     onClick={() => {
-                       if (selectedSupply) {
-                         const handled = applySupply(plot.id);
-                         if (handled) {
-                           return;
-                         }
-                       }
+              {farm.map((plot) => {
+                const isReady = Boolean(plot.crop && plot.ready);
+                const isGreenhouse = Boolean(plot.greenhouse);
+                const isEmpty = !plot.crop;
+                const highlightForPlacement = pendingGreenhousePlacement && !isGreenhouse;
 
-                       if (plot.crop && plot.ready) {
-                         harvestCrop(plot.id);
-                       } else if (!plot.crop && selectedSeed) {
-                         plantSeed(plot.id);
-                       } else if (plot.crop && !plot.watered) {
-                         waterPlot(plot.id);
-                       }
-                     }}>
-                  <div className="h-full flex flex-col items-center justify-center text-2xl">
-                    {plot.greenhouse && (
-                      <div className="absolute top-0 right-0 text-xs">🏢</div>
-                    )}
-                    {plot.pest && (
-                      <div className="absolute top-0 left-0 text-xs animate-bounce">🐛</div>
-                    )}
-                    {plot.fertilized && !plot.ready && (
-                      <div className="absolute bottom-1 right-1 text-xs">🌿</div>
-                    )}
-                    {plot.crop ? (
-                      <>
-                        <div className={`transform transition-transform duration-500 ${
-                          plot.ready ? 'scale-125 animate-bounce' : 'scale-100'
-                        }`}>
-                          {CROPS[plot.crop].emoji}
-                        </div>
-                        <div className="flex absolute bottom-0 left-0 right-0 justify-center">
-                          {plot.watered && <Droplets className="w-3 h-3 text-blue-400" />}
-                        </div>
-                      </>
-                    ) : (
-                      selectedSeed && <div className="text-gray-400">+</div>
-                    )}
+                let tileStyle = '';
+                if (isReady) {
+                  tileStyle = 'bg-amber-200 border-amber-500 animate-pulse';
+                } else if (isGreenhouse) {
+                  tileStyle = isEmpty
+                    ? 'bg-teal-50 border-teal-400'
+                    : 'bg-teal-100 border-teal-400';
+                } else if (plot.crop) {
+                  tileStyle = 'bg-lime-100 border-lime-400';
+                } else {
+                  tileStyle = 'bg-gray-100 border-gray-300 hover:bg-green-50';
+                }
+
+                const placementRing = highlightForPlacement
+                  ? 'ring-2 ring-teal-400 ring-offset-2'
+                  : '';
+
+                return (
+                  <div key={plot.id}
+                       className={`aspect-square border-2 rounded-lg cursor-pointer transition-all duration-300 hover:scale-105 relative ${tileStyle} ${placementRing}`}
+                       onClick={() => {
+                         if (pendingGreenhousePlacement) {
+                           const handled = placeGreenhouse(plot.id);
+                           if (handled) {
+                             return;
+                           }
+                         }
+
+                         if (selectedSupply) {
+                           const handled = applySupply(plot.id);
+                           if (handled) {
+                             return;
+                           }
+                         }
+
+                         if (plot.crop && plot.ready) {
+                           harvestCrop(plot.id);
+                         } else if (!plot.crop && selectedSeed) {
+                           plantSeed(plot.id);
+                         } else if (plot.crop && !plot.watered) {
+                           waterPlot(plot.id);
+                         }
+                       }}>
+                    <div className="h-full flex flex-col items-center justify-center text-2xl">
+                      {plot.greenhouse && (
+                        <div className="absolute top-0 right-0 text-xs">🏢</div>
+                      )}
+                      {plot.pest && (
+                        <div className="absolute top-0 left-0 text-xs animate-bounce">🐛</div>
+                      )}
+                      {plot.fertilized && !plot.ready && (
+                        <div className="absolute bottom-1 right-1 text-xs">🌿</div>
+                      )}
+                      {plot.crop ? (
+                        <>
+                          <div className={`transform transition-transform duration-500 ${
+                            plot.ready ? 'scale-125 animate-bounce' : 'scale-100'
+                          }`}>
+                            {CROPS[plot.crop].emoji}
+                          </div>
+                          <div className="flex absolute bottom-0 left-0 right-0 justify-center">
+                            {plot.watered && <Droplets className="w-3 h-3 text-blue-400" />}
+                          </div>
+                        </>
+                      ) : (
+                        selectedSeed && <div className="text-gray-400">+</div>
+                      )}
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
+            {buildings?.sprinkler && (
+              <div className="mb-4 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-700 flex items-center gap-2">
+                <Droplets className="w-3 h-3" />
+                自動灑水器會在每日清晨為尚未成熟的作物補水，並降低人工澆水所需體力。
+              </div>
+            )}
 
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-6 text-sm text-gray-700">
               <div>
@@ -1020,15 +1119,18 @@ const FarmGame = () => {
             </div>
 
             {/* 建築展示 */}
-            {Object.keys(buildings).length > 0 && (
+            {buildingEntries.length > 0 && (
               <div className="mt-4">
                 <h3 className="text-lg font-bold mb-2">建築設施</h3>
                 <div className="flex flex-wrap gap-2">
-                  {Object.keys(buildings).map(buildingType => (
-                    <div key={buildingType} 
+                  {buildingEntries.map(entry => (
+                    <div key={entry.key}
                          className="bg-blue-100 rounded-lg p-2 flex items-center space-x-2">
-                      <span className="text-2xl">{BUILDINGS[buildingType].emoji}</span>
-                      <span className="text-sm font-semibold">{BUILDINGS[buildingType].name}</span>
+                      <span className="text-2xl">{entry.meta.emoji}</span>
+                      <span className="text-sm font-semibold">
+                        {entry.meta.name}
+                        {entry.key === 'greenhouse' && entry.count ? ` x${entry.count}` : ''}
+                      </span>
                     </div>
                   ))}
                 </div>
@@ -1192,14 +1294,30 @@ const FarmGame = () => {
 
             {/* 市場價格 */}
             <div className="bg-white bg-opacity-90 rounded-lg p-4 shadow-lg">
-              <div className="flex items-center justify-between mb-3">
+              <div className="flex flex-wrap items-start justify-between gap-2 mb-3">
                 <h3 className="text-lg font-bold flex items-center gap-2">
                   <TrendingUp className="w-4 h-4 text-green-600" />
                   市場價格
                 </h3>
-                <div className="flex items-center gap-1 text-xs text-gray-500">
-                  <Clock3 className="w-3 h-3" />
-                  <span>{marketUpdateTime ? new Date(marketUpdateTime).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' }) : '更新中…'}</span>
+                <div className="flex flex-col items-end gap-2 text-xs">
+                  <div className="flex items-center gap-1 text-gray-500">
+                    <Clock3 className="w-3 h-3" />
+                    <span>{marketUpdateTime ? new Date(marketUpdateTime).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' }) : '更新中…'}</span>
+                  </div>
+                  <div className="flex items-center gap-1 bg-gray-100 rounded-full p-1">
+                    <button
+                      onClick={() => setMarketView('summary')}
+                      className={`px-2 py-1 rounded-full transition-colors ${marketView === 'summary' ? 'bg-green-500 text-white' : 'text-gray-600 hover:text-green-600'}`}
+                    >
+                      日常總覽
+                    </button>
+                    <button
+                      onClick={() => setMarketView('list')}
+                      className={`px-2 py-1 rounded-full transition-colors ${marketView === 'list' ? 'bg-green-500 text-white' : 'text-gray-600 hover:text-green-600'}`}
+                    >
+                      完整列表
+                    </button>
+                  </div>
                 </div>
               </div>
               <div className="bg-slate-50 border border-slate-200 rounded-lg p-2 mb-3">
@@ -1216,89 +1334,155 @@ const FarmGame = () => {
                   ></div>
                 </div>
               </div>
-              {marketInsights.risers.length > 0 && (
-                <div className="mb-3">
-                  <div className="flex items-center gap-1 text-xs font-semibold text-green-600 uppercase tracking-wide">
-                    <TrendingUp className="w-3 h-3" />
-                    漲勢領先
-                  </div>
-                  <div className="mt-1 space-y-1">
-                    {marketInsights.risers.map(entry => {
-                      const percentText = entry.percentFromPrevious != null ? entry.percentFromPrevious.toFixed(1) : '—';
-                      const percentDisplay = percentText === '—' ? '—' : `${percentText}%`;
-                      return (
-                        <div key={`rise-${entry.key}`} className="flex items-center justify-between text-xs bg-green-50 border border-green-100 rounded px-2 py-1 text-green-700">
-                          <span>{entry.emoji} {entry.name}</span>
-                          <span>
-                            +${entry.changeFromPrevious} ({percentDisplay})
-                          </span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-              {marketInsights.fallers.length > 0 && (
-                <div className="mb-3">
-                  <div className="flex items-center gap-1 text-xs font-semibold text-red-600 uppercase tracking-wide">
-                    <TrendingDown className="w-3 h-3" />
-                    價格回落
-                  </div>
-                  <div className="mt-1 space-y-1">
-                    {marketInsights.fallers.map(entry => {
-                      const percentText = entry.percentFromPrevious != null ? Math.abs(entry.percentFromPrevious).toFixed(1) : '—';
-                      const percentDisplay = percentText === '—' ? '—' : `${percentText}%`;
-                      return (
-                        <div key={`fall-${entry.key}`} className="flex items-center justify-between text-xs bg-red-50 border border-red-100 rounded px-2 py-1 text-red-700">
-                          <span>{entry.emoji} {entry.name}</span>
-                          <span>
-                            -${Math.abs(entry.changeFromPrevious)} ({percentDisplay})
-                          </span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-              <div className="space-y-2 border-t border-slate-200 pt-2">
-                {marketInsights.sortedByPremium.slice(0, 5).map(entry => {
-                  const trend = entry.changeFromPrevious ?? 0;
-                  const trendClass = trend > 0 ? 'text-green-600' : trend < 0 ? 'text-red-600' : 'text-gray-500';
-                  const premiumClass = entry.changeFromBase > 0 ? 'text-green-600' : entry.changeFromBase < 0 ? 'text-red-600' : 'text-gray-600';
-                  const percentFromPrevious = entry.percentFromPrevious != null ? entry.percentFromPrevious.toFixed(1) : '—';
-                  const premiumPercent = `${entry.percentFromBase >= 0 ? '+' : ''}${entry.percentFromBase.toFixed(1)}%`;
-                  const priceShare = marketInsights.highestPrice > 0 ? Math.min(100, Math.max(6, (entry.price / marketInsights.highestPrice) * 100)) : 0;
-
-                  return (
-                    <div key={entry.key} className="rounded-lg border border-slate-200 p-2">
-                      <div className="flex justify-between items-center text-sm font-semibold text-slate-800">
-                        <span>{entry.emoji} {entry.name}</span>
-                        <span>${entry.price}</span>
+              {marketView === 'summary' ? (
+                <>
+                  {marketInsights.risers.length > 0 && (
+                    <div className="mb-3">
+                      <div className="flex items-center gap-1 text-xs font-semibold text-green-600 uppercase tracking-wide">
+                        <TrendingUp className="w-3 h-3" />
+                        漲勢領先
                       </div>
-                      <div className="flex justify-between text-xs mt-1 text-slate-500">
-                        <span>基準 ${entry.basePrice}</span>
-                        <span className={premiumClass}>
-                          {entry.changeFromBase >= 0 ? '+' : ''}{entry.changeFromBase} ({premiumPercent})
-                        </span>
-                      </div>
-                      <div className="flex justify-between text-xs mt-1">
-                        <span className={trendClass}>
-                          {trend > 0 ? `▲ +${trend}` : trend < 0 ? `▼ ${trend}` : '→ 持平'}
-                        </span>
-                        <span className={trendClass}>
-                          {percentFromPrevious !== '—' ? `${trend > 0 ? '+' : ''}${percentFromPrevious}%` : '—'}
-                        </span>
-                      </div>
-                      <div className="bg-slate-100 h-1 rounded-full overflow-hidden mt-2">
-                        <div
-                          className="bg-slate-400 h-full transition-all"
-                          style={{ width: `${priceShare}%` }}
-                        ></div>
+                      <div className="mt-1 space-y-1">
+                        {marketInsights.risers.map(entry => {
+                          const percentText = entry.percentFromPrevious != null ? entry.percentFromPrevious.toFixed(1) : '—';
+                          const percentDisplay = percentText === '—' ? '—' : `${percentText}%`;
+                          return (
+                            <div key={`rise-${entry.key}`} className="flex items-center justify-between text-xs bg-green-50 border border-green-100 rounded px-2 py-1 text-green-700">
+                              <span>{entry.emoji} {entry.name}</span>
+                              <span>
+                                +${entry.changeFromPrevious} ({percentDisplay})
+                              </span>
+                            </div>
+                          );
+                        })}
                       </div>
                     </div>
-                  );
-                })}
-              </div>
+                  )}
+                  {marketInsights.fallers.length > 0 && (
+                    <div className="mb-3">
+                      <div className="flex items-center gap-1 text-xs font-semibold text-red-600 uppercase tracking-wide">
+                        <TrendingDown className="w-3 h-3" />
+                        價格回落
+                      </div>
+                      <div className="mt-1 space-y-1">
+                        {marketInsights.fallers.map(entry => {
+                          const percentText = entry.percentFromPrevious != null ? Math.abs(entry.percentFromPrevious).toFixed(1) : '—';
+                          const percentDisplay = percentText === '—' ? '—' : `${percentText}%`;
+                          return (
+                            <div key={`fall-${entry.key}`} className="flex items-center justify-between text-xs bg-red-50 border border-red-100 rounded px-2 py-1 text-red-700">
+                              <span>{entry.emoji} {entry.name}</span>
+                              <span>
+                                -${Math.abs(entry.changeFromPrevious)} ({percentDisplay})
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                  <div className="space-y-2 border-t border-slate-200 pt-2">
+                    {marketInsights.sortedByPremium.slice(0, 5).map(entry => {
+                      const trend = entry.changeFromPrevious ?? 0;
+                      const trendClass = trend > 0 ? 'text-green-600' : trend < 0 ? 'text-red-600' : 'text-gray-500';
+                      const premiumClass = entry.changeFromBase > 0 ? 'text-green-600' : entry.changeFromBase < 0 ? 'text-red-600' : 'text-gray-600';
+                      const percentFromPrevious = entry.percentFromPrevious != null ? entry.percentFromPrevious.toFixed(1) : '—';
+                      const premiumPercent = `${entry.percentFromBase >= 0 ? '+' : ''}${entry.percentFromBase.toFixed(1)}%`;
+                      const priceShare = marketInsights.highestPrice > 0 ? Math.min(100, Math.max(6, (entry.price / marketInsights.highestPrice) * 100)) : 0;
+
+                      return (
+                        <div key={entry.key} className="rounded-lg border border-slate-200 p-2">
+                          <div className="flex justify-between items-center text-sm font-semibold text-slate-800">
+                            <span>{entry.emoji} {entry.name}</span>
+                            <span>${entry.price}</span>
+                          </div>
+                          <div className="flex justify-between text-xs mt-1 text-slate-500">
+                            <span>基準 ${entry.basePrice}</span>
+                            <span className={premiumClass}>
+                              {entry.changeFromBase >= 0 ? '+' : ''}{entry.changeFromBase} ({premiumPercent})
+                            </span>
+                          </div>
+                          <div className="flex justify-between text-xs mt-1">
+                            <span className={trendClass}>
+                              {trend > 0 ? `▲ +${trend}` : trend < 0 ? `▼ ${trend}` : '→ 持平'}
+                            </span>
+                            <span className={trendClass}>
+                              {percentFromPrevious !== '—' ? `${trend > 0 ? '+' : ''}${percentFromPrevious}%` : '—'}
+                            </span>
+                          </div>
+                          <div className="bg-slate-100 h-1 rounded-full overflow-hidden mt-2">
+                            <div
+                              className="bg-slate-400 h-full transition-all"
+                              style={{ width: `${priceShare}%` }}
+                            ></div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="flex justify-end mb-2">
+                    <div className="flex items-center gap-1 text-[11px] text-gray-600 bg-gray-100 rounded-full px-2 py-1">
+                      排序：
+                      <button
+                        onClick={() => setMarketListSort('price')}
+                        className={`px-2 py-[2px] rounded-full transition-colors ${marketListSort === 'price' ? 'bg-green-500 text-white' : 'text-gray-600 hover:text-green-600'}`}
+                      >
+                        價格
+                      </button>
+                      <button
+                        onClick={() => setMarketListSort('premium')}
+                        className={`px-2 py-[2px] rounded-full transition-colors ${marketListSort === 'premium' ? 'bg-green-500 text-white' : 'text-gray-600 hover:text-green-600'}`}
+                      >
+                        較基準
+                      </button>
+                      <button
+                        onClick={() => setMarketListSort('change')}
+                        className={`px-2 py-[2px] rounded-full transition-colors ${marketListSort === 'change' ? 'bg-green-500 text-white' : 'text-gray-600 hover:text-green-600'}`}
+                      >
+                        較昨日
+                      </button>
+                    </div>
+                  </div>
+                  <div className="border border-slate-200 rounded-lg overflow-hidden">
+                    <div className="grid grid-cols-4 gap-2 px-3 py-2 text-xs font-semibold text-slate-600 bg-slate-100">
+                      <span>作物</span>
+                      <span className="text-right">現價</span>
+                      <span className="text-right">對基準</span>
+                      <span className="text-right">對昨日</span>
+                    </div>
+                    {sortedMarketEntries.length > 0 ? (
+                      sortedMarketEntries.map(entry => {
+                        const baseChange = entry.changeFromBase ?? 0;
+                        const basePercent = entry.percentFromBase ?? 0;
+                        const baseClass = baseChange > 0 ? 'text-green-600' : baseChange < 0 ? 'text-red-600' : 'text-slate-500';
+                        const change = entry.changeFromPrevious ?? 0;
+                        const changePercent = entry.percentFromPrevious ?? 0;
+                        const changeClass = change > 0 ? 'text-green-600' : change < 0 ? 'text-red-600' : 'text-slate-500';
+                        const changeDisplay = entry.changeFromPrevious == null ? '—' : `${change > 0 ? '+' : ''}${change} (${changePercent >= 0 ? '+' : ''}${changePercent.toFixed(1)}%)`;
+                        const baseDisplay = `${baseChange >= 0 ? '+' : ''}${baseChange} (${basePercent >= 0 ? '+' : ''}${basePercent.toFixed(1)}%)`;
+
+                        return (
+                          <div key={`list-${entry.key}`} className="grid grid-cols-4 gap-2 px-3 py-2 text-xs border-t border-slate-100">
+                            <span className="flex items-center gap-2 font-medium text-slate-700">
+                              <span>{entry.emoji}</span>
+                              {entry.name}
+                            </span>
+                            <span className="text-right font-semibold text-slate-800">${entry.price}</span>
+                            <span className={`text-right ${baseClass}`}>{baseDisplay}</span>
+                            <span className={`text-right ${changeClass}`}>{changeDisplay}</span>
+                          </div>
+                        );
+                      })
+                    ) : (
+                      <div className="px-3 py-4 text-xs text-center text-slate-500 border-t border-slate-100">
+                        暫無市場資料。
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
             </div>
 
             {/* 庫存 */}
@@ -1316,6 +1500,25 @@ const FarmGame = () => {
                   <div className="text-amber-600 font-semibold">估值 ${inventoryInsights.totalValue}</div>
                 </div>
               </div>
+              {inventoryInsights.items.length > 0 && (
+                <div className="flex justify-end mb-2">
+                  <div className="flex items-center gap-1 text-[11px] text-amber-700 bg-amber-100 rounded-full px-2 py-1">
+                    排序：
+                    <button
+                      onClick={() => setInventorySortMode('value')}
+                      className={`px-2 py-[2px] rounded-full transition-colors ${inventorySortMode === 'value' ? 'bg-amber-500 text-white' : 'text-amber-700 hover:text-amber-900'}`}
+                    >
+                      總價值
+                    </button>
+                    <button
+                      onClick={() => setInventorySortMode('count')}
+                      className={`px-2 py-[2px] rounded-full transition-colors ${inventorySortMode === 'count' ? 'bg-amber-500 text-white' : 'text-amber-700 hover:text-amber-900'}`}
+                    >
+                      數量
+                    </button>
+                  </div>
+                </div>
+              )}
               {inventoryInsights.items.length > 0 ? (
                 <div className="space-y-2">
                   {inventoryInsights.items.map(item => {
@@ -1607,31 +1810,55 @@ const FarmGame = () => {
           <div className="bg-white rounded-lg p-6 max-w-3xl w-full mx-4 max-h-96 overflow-y-auto">
             <h2 className="text-xl font-bold mb-4">建築商店</h2>
             <div className="grid grid-cols-2 gap-4">
-              {Object.entries(BUILDINGS).map(([key, building]) => (
-                <div key={key} 
-                     className={`border rounded-lg p-4 cursor-pointer transition-colors ${
-                       buildings[key] 
-                         ? 'bg-green-100 border-green-400' 
-                         : 'hover:bg-gray-50'
-                     }`}
-                     onClick={() => buyBuilding(key)}>
-                  <div className="text-center">
-                    <div className="text-3xl mb-2">{building.emoji}</div>
-                    <div className="font-semibold">{building.name}</div>
-                    <div className={`font-bold ${buildings[key] ? 'text-green-600' : 'text-green-600'}`}>
-                      {buildings[key] ? '已擁有' : `${building.price}`}
-                    </div>
-                    <div className="text-xs text-gray-600 mt-2">
-                      {building.description}
-                    </div>
-                    {building.boost !== 1.0 && (
-                      <div className="text-xs text-blue-600">
-                        效果加成: {Math.round(building.boost * 100)}%
+              {Object.entries(BUILDINGS).map(([key, building]) => {
+                const rawValue = buildings?.[key];
+                const isGreenhouse = key === 'greenhouse';
+                const greenhouseCount = isGreenhouse
+                  ? (typeof rawValue === 'number'
+                    ? rawValue
+                    : (rawValue && Array.isArray(farm) ? farm.filter(plot => plot.greenhouse).length : 0))
+                  : 0;
+                const isOwned = isGreenhouse ? greenhouseCount > 0 : Boolean(rawValue);
+                const canPurchase = isGreenhouse || !isOwned;
+                const cardHighlight = isGreenhouse && greenhouseCount > 0
+                  ? 'bg-teal-50 border-teal-300'
+                  : isOwned
+                    ? 'bg-green-100 border-green-400'
+                    : 'hover:bg-gray-50';
+
+                return (
+                  <div key={key}
+                       className={`border rounded-lg p-4 transition-colors ${cardHighlight} ${canPurchase ? 'cursor-pointer' : 'cursor-not-allowed opacity-80'}`}
+                       onClick={() => canPurchase && buyBuilding(key)}>
+                    <div className="text-center">
+                      <div className="text-3xl mb-2">{building.emoji}</div>
+                      <div className="font-semibold">{building.name}</div>
+                      <div className={`font-bold ${isOwned && !isGreenhouse ? 'text-green-600' : 'text-green-600'}`}>
+                        {isGreenhouse
+                          ? `$${building.price}`
+                          : isOwned
+                            ? '已擁有'
+                            : `$${building.price}`}
                       </div>
-                    )}
+                      <div className="text-xs text-gray-600 mt-2 space-y-1">
+                        <p>{building.description}</p>
+                        {isGreenhouse && (
+                          <p className="text-teal-600">
+                            {greenhouseCount > 0
+                              ? `目前共有 ${greenhouseCount} 格溫室土地，可再購買擴充。`
+                              : '每次購買可讓一格農地升級為溫室。'}
+                          </p>
+                        )}
+                      </div>
+                      {building.boost !== 1.0 && (
+                        <div className="text-xs text-blue-600">
+                          效果加成: {Math.round(building.boost * 100)}%
+                        </div>
+                      )}
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
             <button onClick={() => setShowBuildingShop(false)}
                     className="mt-4 w-full bg-gray-500 hover:bg-gray-600 text-white py-2 px-4 rounded transition-colors">

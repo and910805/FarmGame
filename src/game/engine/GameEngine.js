@@ -46,6 +46,26 @@ export class GameEngine {
     }
   }
 
+  getGreenhouseCount(buildings = this.state.buildings) {
+    if (!buildings) {
+      return 0;
+    }
+
+    const rawValue = buildings.greenhouse;
+    if (typeof rawValue === 'number') {
+      return Math.max(0, Math.floor(rawValue));
+    }
+
+    if (rawValue) {
+      const { farm } = this.state;
+      if (Array.isArray(farm)) {
+        return farm.reduce((count, plot) => count + (plot.greenhouse ? 1 : 0), 0);
+      }
+    }
+
+    return 0;
+  }
+
   buySeed(seedType) {
     const { money, marketPrices } = this.state;
     const price = (marketPrices && marketPrices[seedType]) || CROPS[seedType].price;
@@ -80,7 +100,7 @@ export class GameEngine {
   }
 
   expandFarm() {
-    const { money, farm, buildings } = this.state;
+    const { money, farm } = this.state;
     if (!Array.isArray(farm)) return;
 
     if (farm.length >= MAX_FARM_PLOTS) {
@@ -95,8 +115,6 @@ export class GameEngine {
     }
 
     const plotsToAdd = Math.min(FARM_EXPANSION_BATCH, MAX_FARM_PLOTS - farm.length);
-    const hasGreenhouse = Boolean(buildings?.greenhouse);
-
     this.setters.setMoney(prev => prev - price);
     this.setters.setFarm(prev => {
       const safePrev = Array.isArray(prev) ? prev : [];
@@ -110,7 +128,7 @@ export class GameEngine {
           plantTime: null,
           watered: false,
           fertilized: false,
-          greenhouse: hasGreenhouse,
+          greenhouse: false,
           pest: false,
           pestDays: 0,
           ready: false,
@@ -293,11 +311,20 @@ export class GameEngine {
       [crop]: ((prev && prev[crop]) || 0) + 1,
     }));
     this.setters.setExperience(prev => prev + 10);
-    this.setters.setFarm(prev => prev.map(p =>
+    this.setters.setFarm(prev => prev.map(p => (
       p.id === plotId
-        ? { ...p, crop: null, plantTime: null, watered: false, ready: false, pest: false, pestDays: 0, fertilized: false }
+        ? {
+            ...p,
+            crop: null,
+            plantTime: null,
+            watered: false,
+            ready: false,
+            pest: false,
+            pestDays: 0,
+            fertilized: false,
+          }
         : p
-    ));
+    )));
 
     this.notify(`收成了 ${CROPS[crop].emoji}！獲得 $${sellPrice}`, { type: 'success' });
   }
@@ -356,8 +383,41 @@ export class GameEngine {
   }
 
   buyBuilding(buildingType) {
-    const { money, buildings } = this.state;
+    const { money, buildings, farm, pendingGreenhousePlacement } = this.state;
     const building = BUILDINGS[buildingType];
+
+    if (!building) {
+      return;
+    }
+
+    if (buildingType === 'greenhouse') {
+      if (pendingGreenhousePlacement) {
+        this.notify('已經購買溫室模組，請先在農地上選擇位置。', { type: 'info' });
+        return;
+      }
+
+      const availablePlots = Array.isArray(farm)
+        ? farm.filter(plot => !plot.greenhouse)
+        : [];
+
+      if (availablePlots.length === 0) {
+        this.notify('所有農地都已升級為溫室囉！', { type: 'info' });
+        return;
+      }
+
+      if (money < building.price) {
+        this.notify('金錢不足，暫時無法購買溫室模組。', { type: 'error' });
+        return;
+      }
+
+      this.setters.setMoney(prev => prev - building.price);
+      if (typeof this.setters.setPendingGreenhousePlacement === 'function') {
+        this.setters.setPendingGreenhousePlacement(true);
+      }
+      this.setters.setShowBuildingShop(false);
+      this.notify('溫室模組準備就緒，請點選一格農地完成建造。', { type: 'success' });
+      return;
+    }
 
     if (buildings?.[buildingType]) {
       this.notify('已經擁有此建築！', { type: 'info' });
@@ -368,17 +428,63 @@ export class GameEngine {
       this.setters.setMoney(prev => prev - building.price);
       this.setters.setBuildings(prev => ({ ...prev, [buildingType]: true }));
 
-      if (buildingType === 'greenhouse') {
-        this.setters.setFarm(prev => prev.map(plot => (
-          plot.greenhouse ? plot : { ...plot, greenhouse: true }
-        )));
-      }
-
       this.setters.setShowBuildingShop(false);
       this.notify(`建造了 ${building.emoji} ${building.name}！`, { type: 'success' });
     } else {
       this.notify('金錢不足！', { type: 'error' });
     }
+  }
+
+  placeGreenhouse(plotId) {
+    const { pendingGreenhousePlacement, farm } = this.state;
+    if (!pendingGreenhousePlacement) {
+      return false;
+    }
+
+    if (!Array.isArray(farm) || farm.length === 0) {
+      this.notify('目前沒有可用的農地資料，稍後再試試看。', { type: 'warning' });
+      return true;
+    }
+
+    const targetPlot = farm.find(plot => plot.id === plotId);
+    if (!targetPlot) {
+      this.notify('無法在這裡建造溫室。', { type: 'error' });
+      return true;
+    }
+
+    if (targetPlot.greenhouse) {
+      this.notify('這塊土地已經是溫室囉！', { type: 'info' });
+      return true;
+    }
+
+    let built = false;
+    this.setters.setFarm(prev => prev.map(plot => {
+      if (plot.id === plotId && !plot.greenhouse) {
+        built = true;
+        return { ...plot, greenhouse: true };
+      }
+      return plot;
+    }));
+
+    if (!built) {
+      this.notify('暫時無法建造，請確認土地是否空閒。', { type: 'warning' });
+      return true;
+    }
+
+    if (typeof this.setters.setPendingGreenhousePlacement === 'function') {
+      this.setters.setPendingGreenhousePlacement(false);
+    }
+
+    if (typeof this.setters.setBuildings === 'function') {
+      this.setters.setBuildings(prev => {
+        const previous = prev || {};
+        const count = this.getGreenhouseCount(previous);
+        return { ...previous, greenhouse: count + 1 };
+      });
+    }
+
+    this.notify('溫室建造完成，這格土地不再受天氣影響！', { type: 'success' });
+    return true;
   }
 
   buyTool(toolType) {

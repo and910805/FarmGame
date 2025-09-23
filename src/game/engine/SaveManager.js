@@ -83,6 +83,15 @@ export class SaveManager {
       animalCapacity,
     } = this.state;
 
+    const safeFarm = Array.isArray(farm) ? farm : [];
+    const greenhouseCount = safeFarm.reduce((count, plot) => count + (plot.greenhouse ? 1 : 0), 0);
+    const buildingSnapshot = { ...(buildings || {}) };
+    if (greenhouseCount > 0) {
+      buildingSnapshot.greenhouse = greenhouseCount;
+    } else if (buildingSnapshot.greenhouse) {
+      delete buildingSnapshot.greenhouse;
+    }
+
     return {
       money,
       energy,
@@ -97,7 +106,7 @@ export class SaveManager {
       farm,
       farmSupplies,
       animals,
-      buildings,
+      buildings: buildingSnapshot,
       tools,
       completedAchievements: Array.from(completedAchievements || []),
       dailyStats,
@@ -177,10 +186,42 @@ export class SaveManager {
       normalizedFarm = sanitizedFarm.slice(0, MAX_FARM_PLOTS);
     }
 
-    const hasGreenhouse = Boolean(gameState.buildings?.greenhouse);
-    if (hasGreenhouse) {
-      normalizedFarm = normalizedFarm.map(plot => ({ ...plot, greenhouse: true }));
+    let normalizedBuildings = { ...(gameState.buildings || {}) };
+    if (normalizedBuildings.well) {
+      normalizedBuildings.sprinkler = true;
+      delete normalizedBuildings.well;
     }
+
+    const rawGreenhouse = normalizedBuildings.greenhouse;
+    let desiredGreenhouseCount = 0;
+    if (typeof rawGreenhouse === 'number') {
+      desiredGreenhouseCount = Math.max(0, Math.floor(rawGreenhouse));
+    } else if (rawGreenhouse) {
+      desiredGreenhouseCount = normalizedFarm.length;
+    }
+
+    let actualGreenhouseCount = normalizedFarm.reduce((count, plot) => count + (plot.greenhouse ? 1 : 0), 0);
+    if (desiredGreenhouseCount > actualGreenhouseCount) {
+      let remaining = desiredGreenhouseCount - actualGreenhouseCount;
+      normalizedFarm = normalizedFarm.map(plot => {
+        if (!plot.greenhouse && remaining > 0) {
+          remaining -= 1;
+          return { ...plot, greenhouse: true };
+        }
+        return plot;
+      });
+      actualGreenhouseCount = normalizedFarm.reduce((count, plot) => count + (plot.greenhouse ? 1 : 0), 0);
+      desiredGreenhouseCount = actualGreenhouseCount;
+    } else if (desiredGreenhouseCount === 0 && actualGreenhouseCount > 0) {
+      desiredGreenhouseCount = actualGreenhouseCount;
+    }
+
+    if (desiredGreenhouseCount > 0) {
+      normalizedBuildings.greenhouse = desiredGreenhouseCount;
+    } else {
+      delete normalizedBuildings.greenhouse;
+    }
+
     this.setters.setFarm(normalizedFarm);
     this.setters.setFarmSupplies(gameState.farmSupplies || createDefaultSupplies());
     const sanitizedAnimals = Array.isArray(gameState.animals)
@@ -197,11 +238,6 @@ export class SaveManager {
       const desiredCapacity = Math.max(gameState.animalCapacity || BASE_ANIMAL_CAPACITY, requiredCapacity);
       this.setters.setAnimalCapacity(Math.min(desiredCapacity, MAX_ANIMAL_CAPACITY));
     }
-    const normalizedBuildings = { ...(gameState.buildings || {}) };
-    if (normalizedBuildings.well) {
-      normalizedBuildings.sprinkler = true;
-      delete normalizedBuildings.well;
-    }
     this.setters.setBuildings(normalizedBuildings);
     this.setters.setTools(gameState.tools || 'basic');
     this.setters.setCompletedAchievements(new Set(gameState.completedAchievements || []));
@@ -215,6 +251,9 @@ export class SaveManager {
       this.setters.setMarketUpdateTime(Date.now());
     }
     this.setters.setSelectedSupply(gameState.selectedSupply || null);
+    if (typeof this.setters.setPendingGreenhousePlacement === 'function') {
+      this.setters.setPendingGreenhousePlacement(false);
+    }
   }
 
   exportSave() {
