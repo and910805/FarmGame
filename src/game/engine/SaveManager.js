@@ -1,15 +1,29 @@
-import { ANIMALS, CROPS } from '../data/GameCatalog';
+import { ANIMALS, CROPS, ANIMAL_PRODUCTS } from '../data/GameCatalog';
+import { BASE_ANIMAL_CAPACITY, MAX_ANIMAL_CAPACITY, BASE_FARM_PLOTS, MAX_FARM_PLOTS } from './GameEngine';
 
 const createDefaultInventory = () => {
   const inventory = {};
-  Object.keys(CROPS).forEach(key => {
+  [...Object.keys(CROPS), ...Object.keys(ANIMAL_PRODUCTS)].forEach(key => {
     inventory[key] = 0;
   });
   return inventory;
 };
 
-const createDefaultFarm = () =>
-  Array.from({ length: 25 }, (_, index) => ({
+const withInventoryDefaults = (inventory) => {
+  const defaults = createDefaultInventory();
+  if (!inventory) {
+    return defaults;
+  }
+
+  const sanitized = { ...defaults };
+  Object.entries(inventory).forEach(([key, value]) => {
+    sanitized[key] = typeof value === 'number' ? value : defaults[key] || 0;
+  });
+  return sanitized;
+};
+
+const createDefaultFarm = (length = BASE_FARM_PLOTS) =>
+  Array.from({ length }, (_, index) => ({
     id: index,
     crop: null,
     plantTime: null,
@@ -55,7 +69,7 @@ export class SaveManager {
       season,
       weather,
       weatherDuration,
-      inventory,
+      inventory: rawInventory,
       farm,
       farmSupplies,
       animals,
@@ -66,6 +80,7 @@ export class SaveManager {
       automation,
       marketPrices,
       selectedSupply,
+      animalCapacity,
     } = this.state;
 
     return {
@@ -78,7 +93,7 @@ export class SaveManager {
       season,
       weather,
       weatherDuration,
-      inventory,
+      inventory: withInventoryDefaults(rawInventory),
       farm,
       farmSupplies,
       animals,
@@ -89,8 +104,9 @@ export class SaveManager {
       automation,
       marketPrices,
       selectedSupply: selectedSupply || null,
+      animalCapacity: Math.max(animalCapacity || BASE_ANIMAL_CAPACITY, BASE_ANIMAL_CAPACITY),
       saveTime: new Date().toISOString(),
-      version: '1.0',
+      version: '1.1',
     };
   }
 
@@ -132,7 +148,7 @@ export class SaveManager {
     this.setters.setSeason(gameState.season);
     this.setters.setWeather(gameState.weather);
     this.setters.setWeatherDuration(gameState.weatherDuration || 5);
-    this.setters.setInventory(gameState.inventory || createDefaultInventory());
+    this.setters.setInventory(withInventoryDefaults(gameState.inventory));
     const sanitizedFarm = Array.isArray(gameState.farm)
       ? gameState.farm.map((plot, index) => ({
           id: plot.id ?? index,
@@ -146,7 +162,26 @@ export class SaveManager {
           ready: plot.crop ? Boolean(plot.ready) : false,
         }))
       : createDefaultFarm();
-    this.setters.setFarm(sanitizedFarm);
+
+    const minPlots = Math.max(BASE_FARM_PLOTS, sanitizedFarm.length);
+    let normalizedFarm = sanitizedFarm;
+    if (sanitizedFarm.length < minPlots) {
+      const needed = minPlots - sanitizedFarm.length;
+      const startId = sanitizedFarm.reduce((max, plot) => Math.max(max, plot.id ?? -1), -1) + 1;
+      const additional = createDefaultFarm(needed).map((plot, idx) => ({
+        ...plot,
+        id: startId + idx,
+      }));
+      normalizedFarm = [...sanitizedFarm, ...additional];
+    } else if (sanitizedFarm.length > MAX_FARM_PLOTS) {
+      normalizedFarm = sanitizedFarm.slice(0, MAX_FARM_PLOTS);
+    }
+
+    const hasGreenhouse = Boolean(gameState.buildings?.greenhouse);
+    if (hasGreenhouse) {
+      normalizedFarm = normalizedFarm.map(plot => ({ ...plot, greenhouse: true }));
+    }
+    this.setters.setFarm(normalizedFarm);
     this.setters.setFarmSupplies(gameState.farmSupplies || createDefaultSupplies());
     const sanitizedAnimals = Array.isArray(gameState.animals)
       ? gameState.animals.map(animal => ({
@@ -157,6 +192,11 @@ export class SaveManager {
         }))
       : [];
     this.setters.setAnimals(sanitizedAnimals);
+    const requiredCapacity = Math.max(sanitizedAnimals.length, BASE_ANIMAL_CAPACITY);
+    if (typeof this.setters.setAnimalCapacity === 'function') {
+      const desiredCapacity = Math.max(gameState.animalCapacity || BASE_ANIMAL_CAPACITY, requiredCapacity);
+      this.setters.setAnimalCapacity(Math.min(desiredCapacity, MAX_ANIMAL_CAPACITY));
+    }
     const normalizedBuildings = { ...(gameState.buildings || {}) };
     if (normalizedBuildings.well) {
       normalizedBuildings.sprinkler = true;

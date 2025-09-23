@@ -20,7 +20,7 @@ class Crop extends BaseEntity {
 }
 
 class Animal extends BaseEntity {
-  constructor(key, { name, price, happiness, emoji, foodCost, income, shelter }) {
+  constructor(key, { name, price, happiness, emoji, foodCost, income, shelter, product }) {
     super(key);
     this.name = name;
     this.price = price;
@@ -29,6 +29,7 @@ class Animal extends BaseEntity {
     this.foodCost = foodCost;
     this.income = income;
     this.shelter = shelter;
+    this.product = product;
   }
 }
 
@@ -96,8 +97,8 @@ class GameCatalog {
     this.animals = {
       dog: new Animal('dog', { name: '狗狗', price: 200, happiness: 50, emoji: '🐕', foodCost: 5, income: 8, shelter: 'dogHouse' }),
       cat: new Animal('cat', { name: '貓咪', price: 150, happiness: 60, emoji: '🐱', foodCost: 3, income: 5, shelter: 'catHouse' }),
-      chicken: new Animal('chicken', { name: '雞', price: 100, happiness: 40, emoji: '🐔', foodCost: 2, income: 12, shelter: 'chickenCoop' }),
-      cow: new Animal('cow', { name: '牛', price: 500, happiness: 30, emoji: '🐄', foodCost: 10, income: 25, shelter: 'barn' }),
+      chicken: new Animal('chicken', { name: '雞', price: 100, happiness: 40, emoji: '🐔', foodCost: 2, income: 12, shelter: 'chickenCoop', product: 'egg' }),
+      cow: new Animal('cow', { name: '牛', price: 500, happiness: 30, emoji: '🐄', foodCost: 10, income: 25, shelter: 'barn', product: 'milk' }),
       pig: new Animal('pig', { name: '豬', price: 300, happiness: 45, emoji: '🐷', foodCost: 8, income: 18, shelter: 'pigPen' }),
       sheep: new Animal('sheep', { name: '羊', price: 250, happiness: 40, emoji: '🐑', foodCost: 6, income: 15, shelter: 'barn' }),
       duck: new Animal('duck', { name: '鴨子', price: 120, happiness: 55, emoji: '🦆', foodCost: 3, income: 10, shelter: 'pond' }),
@@ -146,6 +147,11 @@ class GameCatalog {
       magic: new Tool('magic', { name: '魔法工具', energyReduction: 6, speedBoost: 2, price: 3000 }),
     };
 
+    this.animalProducts = {
+      egg: { key: 'egg', name: '雞蛋', emoji: '🥚', basePrice: 10, animal: 'chicken' },
+      milk: { key: 'milk', name: '鮮奶', emoji: '🥛', basePrice: 20, animal: 'cow' },
+    };
+
     this.achievements = [
       new Achievement({ id: 'firstPlant', name: '初次種植', description: '種下第一株作物', reward: 100, icon: '🌱' }),
       new Achievement({ id: 'richFarmer', name: '富豪農夫', description: '擁有10000金幣', reward: 500, icon: '💰' }),
@@ -190,6 +196,10 @@ class GameCatalog {
   getSupply(key) {
     return this.supplies[key];
   }
+
+  getAnimalProduct(key) {
+    return this.animalProducts[key];
+  }
 }
 
 export const WEATHER_TYPES = ['sunny', 'rainy', 'cloudy', 'storm', 'snow'];
@@ -198,6 +208,7 @@ export const SEASONS = ['spring', 'summer', 'autumn', 'winter'];
 export const catalog = new GameCatalog();
 export const CROPS = catalog.crops;
 export const ANIMALS = catalog.animals;
+export const ANIMAL_PRODUCTS = catalog.animalProducts;
 export const BUILDINGS = catalog.buildings;
 export const TOOLS = catalog.tools;
 export const FARM_SUPPLIES = catalog.supplies;

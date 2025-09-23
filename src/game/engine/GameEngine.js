@@ -1,4 +1,21 @@
-import { CROPS, ANIMALS, BUILDINGS, TOOLS, FARM_SUPPLIES } from '../data/GameCatalog';
+import { CROPS, ANIMALS, BUILDINGS, TOOLS, FARM_SUPPLIES, ANIMAL_PRODUCTS } from '../data/GameCatalog';
+
+export const BASE_FARM_PLOTS = 25;
+export const FARM_EXPANSION_BATCH = 5;
+export const MAX_FARM_PLOTS = 45;
+export const BASE_ANIMAL_CAPACITY = 6;
+export const ANIMAL_CAPACITY_STEP = 3;
+export const MAX_ANIMAL_CAPACITY = 24;
+
+export const getFarmExpansionCost = (currentPlotCount) => {
+  const purchasedBatches = Math.max(0, Math.floor((currentPlotCount - BASE_FARM_PLOTS) / FARM_EXPANSION_BATCH));
+  return 500 + purchasedBatches * 200;
+};
+
+export const getAnimalHousingExpansionCost = (currentCapacity) => {
+  const purchasedSteps = Math.max(0, Math.floor((currentCapacity - BASE_ANIMAL_CAPACITY) / ANIMAL_CAPACITY_STEP));
+  return 650 + purchasedSteps * 250;
+};
 
 export class GameEngine {
   constructor({ stateRef, setters, notifier }) {
@@ -60,6 +77,78 @@ export class GameEngine {
     });
     this.setters.setShowSupplyShop(false);
     this.notify(`購買了 ${supply.emoji} ${supply.name}！`, { type: 'success' });
+  }
+
+  expandFarm() {
+    const { money, farm, buildings } = this.state;
+    if (!Array.isArray(farm)) return;
+
+    if (farm.length >= MAX_FARM_PLOTS) {
+      this.notify('農地已經擴建到極限了！', { type: 'info' });
+      return;
+    }
+
+    const price = getFarmExpansionCost(farm.length);
+    if (money < price) {
+      this.notify('金錢不足，暫時無法擴建農地。', { type: 'error' });
+      return;
+    }
+
+    const plotsToAdd = Math.min(FARM_EXPANSION_BATCH, MAX_FARM_PLOTS - farm.length);
+    const hasGreenhouse = Boolean(buildings?.greenhouse);
+
+    this.setters.setMoney(prev => prev - price);
+    this.setters.setFarm(prev => {
+      const safePrev = Array.isArray(prev) ? prev : [];
+      const next = [...safePrev];
+      const startId = safePrev.reduce((max, plot) => Math.max(max, plot.id ?? -1), -1) + 1;
+
+      for (let i = 0; i < plotsToAdd; i += 1) {
+        next.push({
+          id: startId + i,
+          crop: null,
+          plantTime: null,
+          watered: false,
+          fertilized: false,
+          greenhouse: hasGreenhouse,
+          pest: false,
+          pestDays: 0,
+          ready: false,
+        });
+      }
+
+      return next;
+    });
+
+    this.notify(`農地擴建完成，新增 ${plotsToAdd} 格土地！`, { type: 'success' });
+  }
+
+  expandAnimalHousing() {
+    const { money, animalCapacity } = this.state;
+    const currentCapacity = Math.max(animalCapacity || BASE_ANIMAL_CAPACITY, BASE_ANIMAL_CAPACITY);
+
+    if (currentCapacity >= MAX_ANIMAL_CAPACITY) {
+      this.notify('動物欄位已達上限，無法再擴充。', { type: 'info' });
+      return;
+    }
+
+    const price = getAnimalHousingExpansionCost(currentCapacity);
+    if (money < price) {
+      this.notify('金錢不足，暫時無法擴建動物欄。', { type: 'error' });
+      return;
+    }
+
+    const addedCapacity = Math.min(ANIMAL_CAPACITY_STEP, MAX_ANIMAL_CAPACITY - currentCapacity);
+
+    this.setters.setMoney(prev => prev - price);
+    if (typeof this.setters.setAnimalCapacity === 'function') {
+      this.setters.setAnimalCapacity(prev => {
+        const base = Math.max(prev || BASE_ANIMAL_CAPACITY, BASE_ANIMAL_CAPACITY);
+        return Math.min(base + addedCapacity, MAX_ANIMAL_CAPACITY);
+      });
+    }
+
+    this.notify(`新增 ${addedCapacity} 個動物欄位，快去迎接新伙伴吧！`, { type: 'success' });
   }
 
   selectSupply(supplyType) {
@@ -199,7 +288,10 @@ export class GameEngine {
     const sellPrice = Math.floor(basePrice * bonus);
 
     this.setters.setMoney(prev => prev + sellPrice);
-    this.setters.setInventory(prev => ({ ...prev, [crop]: prev[crop] + 1 }));
+    this.setters.setInventory(prev => ({
+      ...prev,
+      [crop]: ((prev && prev[crop]) || 0) + 1,
+    }));
     this.setters.setExperience(prev => prev + 10);
     this.setters.setFarm(prev => prev.map(p =>
       p.id === plotId
@@ -229,13 +321,19 @@ export class GameEngine {
   }
 
   buyAnimal(animalType) {
-    const { money } = this.state;
+    const { money, animals = [], animalCapacity } = this.state;
     const animal = ANIMALS[animalType];
     const requiredShelter = animal.shelter;
 
     if (requiredShelter && !this.state.buildings?.[requiredShelter]) {
       const shelterName = BUILDINGS[requiredShelter].name;
       this.notify(`需要先建造 ${shelterName} 才能飼養 ${animal.name}！`, { type: 'warning' });
+      return;
+    }
+
+    const capacityLimit = Math.max(animalCapacity || BASE_ANIMAL_CAPACITY, BASE_ANIMAL_CAPACITY);
+    if ((animals?.length || 0) >= capacityLimit) {
+      this.notify('動物欄位已滿，請先擴建或整理空間。', { type: 'warning' });
       return;
     }
 
@@ -296,6 +394,80 @@ export class GameEngine {
       this.notify(`升級工具：${tool.name}！`, { type: 'success' });
     } else {
       this.notify('金錢不足！', { type: 'error' });
+    }
+  }
+
+  getInventorySaleValue(itemKey, quantity) {
+    const count = quantity ?? (this.state.inventory?.[itemKey] || 0);
+    if (!count || count <= 0) {
+      return 0;
+    }
+
+    if (CROPS[itemKey]) {
+      const { marketPrices } = this.state;
+      const basePrice = (marketPrices && marketPrices[itemKey]) || CROPS[itemKey].sellPrice;
+      return Math.max(0, Math.floor(basePrice * count));
+    }
+
+    const product = ANIMAL_PRODUCTS[itemKey];
+    if (!product) {
+      return 0;
+    }
+
+    const { buildings, animals } = this.state;
+    const animalType = product.animal;
+    let multiplier = 1;
+
+    if (animalType && ANIMALS[animalType]) {
+      const animalData = ANIMALS[animalType];
+      const shelterKey = animalData.shelter;
+      if (shelterKey && buildings?.[shelterKey]) {
+        multiplier *= BUILDINGS[shelterKey].boost || 1;
+      }
+
+      const ownedAnimals = (animals || []).filter(a => a.type === animalType);
+      if (ownedAnimals.length > 0) {
+        const totalHappiness = ownedAnimals.reduce((sum, current) => sum + (current.happiness ?? animalData.happiness ?? 50), 0);
+        const averageHappiness = totalHappiness / ownedAnimals.length;
+        const happinessFactor = 0.6 + (averageHappiness / 150);
+        multiplier *= Math.max(0.6, Math.min(1.6, happinessFactor));
+      } else {
+        multiplier *= 0.6;
+      }
+    }
+
+    return Math.max(0, Math.floor(product.basePrice * multiplier * count));
+  }
+
+  sellInventoryItem(itemKey, { quantity } = {}) {
+    const inventory = this.state.inventory || {};
+    const available = inventory[itemKey] || 0;
+    if (!available || available <= 0) {
+      this.notify('庫存不足，無法出售。', { type: 'warning' });
+      return;
+    }
+
+    const amountToSell = Math.min(quantity ?? available, available);
+    const saleValue = this.getInventorySaleValue(itemKey, amountToSell);
+    if (saleValue <= 0) {
+      this.notify('這些物品目前沒有買家。', { type: 'info' });
+      return;
+    }
+
+    this.setters.setInventory(prev => ({
+      ...prev,
+      [itemKey]: Math.max(0, (prev?.[itemKey] || 0) - amountToSell),
+    }));
+
+    this.setters.setMoney(prev => prev + saleValue);
+
+    const product = ANIMAL_PRODUCTS[itemKey];
+    if (product) {
+      this.notify(`出售了 ${amountToSell} 份${product.name}，獲得 $${saleValue}！`, { type: 'success' });
+    } else if (CROPS[itemKey]) {
+      this.notify(`出售了 ${amountToSell} 份${CROPS[itemKey].name}，獲得 $${saleValue}！`, { type: 'success' });
+    } else {
+      this.notify(`出售物品獲得 $${saleValue}！`, { type: 'success' });
     }
   }
 
