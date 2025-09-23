@@ -1,0 +1,170 @@
+class BaseEntity {
+  static nextId = 1;
+
+  constructor(key) {
+    this.id = BaseEntity.nextId++;
+    this.key = key;
+  }
+}
+
+class Crop extends BaseEntity {
+  constructor(key, { name, price, growTime, sellPrice, emoji, weatherBonus }) {
+    super(key);
+    this.name = name;
+    this.price = price;
+    this.growTime = growTime;
+    this.sellPrice = sellPrice;
+    this.emoji = emoji;
+    this.weatherBonus = weatherBonus;
+  }
+}
+
+class Animal extends BaseEntity {
+  constructor(key, { name, price, happiness, emoji, foodCost, income, shelter }) {
+    super(key);
+    this.name = name;
+    this.price = price;
+    this.happiness = happiness;
+    this.emoji = emoji;
+    this.foodCost = foodCost;
+    this.income = income;
+    this.shelter = shelter;
+  }
+}
+
+class Building extends BaseEntity {
+  constructor(key, { name, price, emoji, description, boost }) {
+    super(key);
+    this.name = name;
+    this.price = price;
+    this.emoji = emoji;
+    this.description = description;
+    this.boost = boost;
+  }
+}
+
+class Tool extends BaseEntity {
+  constructor(key, { name, energyReduction, speedBoost, price }) {
+    super(key);
+    this.name = name;
+    this.energyReduction = energyReduction;
+    this.speedBoost = speedBoost;
+    this.price = price;
+  }
+}
+
+class Achievement {
+  constructor({ id, name, description, reward, icon }) {
+    this.id = id;
+    this.name = name;
+    this.description = description;
+    this.reward = reward;
+    this.icon = icon;
+  }
+}
+
+class NPC {
+  constructor({ name, emoji, dialogue, quests }) {
+    this.name = name;
+    this.emoji = emoji;
+    this.dialogue = dialogue;
+    this.quests = quests;
+  }
+}
+
+class GameCatalog {
+  constructor() {
+    this.crops = {
+      carrot: new Crop('carrot', { name: '胡蘿蔔', price: 10, growTime: 5, sellPrice: 25, emoji: '🥕', weatherBonus: { sunny: 1.2, rainy: 1.0, snow: 0.8 } }),
+      corn: new Crop('corn', { name: '玉米', price: 20, growTime: 8, sellPrice: 50, emoji: '🌽', weatherBonus: { sunny: 1.3, rainy: 1.1, snow: 0.6 } }),
+      tomato: new Crop('tomato', { name: '番茄', price: 15, growTime: 6, sellPrice: 35, emoji: '🍅', weatherBonus: { sunny: 1.4, rainy: 0.9, snow: 0.5 } }),
+      wheat: new Crop('wheat', { name: '小麥', price: 8, growTime: 4, sellPrice: 20, emoji: '🌾', weatherBonus: { sunny: 1.1, rainy: 1.2, snow: 0.9 } }),
+      potato: new Crop('potato', { name: '馬鈴薯', price: 12, growTime: 7, sellPrice: 30, emoji: '🥔', weatherBonus: { sunny: 1.0, rainy: 1.3, snow: 1.1 } }),
+      strawberry: new Crop('strawberry', { name: '草莓', price: 25, growTime: 10, sellPrice: 60, emoji: '🍓', weatherBonus: { sunny: 1.2, rainy: 0.8, snow: 0.4 } }),
+    };
+
+    this.animals = {
+      dog: new Animal('dog', { name: '狗狗', price: 200, happiness: 50, emoji: '🐕', foodCost: 5, income: 8, shelter: 'dogHouse' }),
+      cat: new Animal('cat', { name: '貓咪', price: 150, happiness: 60, emoji: '🐱', foodCost: 3, income: 5, shelter: 'catHouse' }),
+      chicken: new Animal('chicken', { name: '雞', price: 100, happiness: 40, emoji: '🐔', foodCost: 2, income: 12, shelter: 'chickenCoop' }),
+      cow: new Animal('cow', { name: '牛', price: 500, happiness: 30, emoji: '🐄', foodCost: 10, income: 25, shelter: 'barn' }),
+      pig: new Animal('pig', { name: '豬', price: 300, happiness: 45, emoji: '🐷', foodCost: 8, income: 18, shelter: 'pigPen' }),
+      sheep: new Animal('sheep', { name: '羊', price: 250, happiness: 40, emoji: '🐑', foodCost: 6, income: 15, shelter: 'barn' }),
+      duck: new Animal('duck', { name: '鴨子', price: 120, happiness: 55, emoji: '🦆', foodCost: 3, income: 10, shelter: 'pond' }),
+      rabbit: new Animal('rabbit', { name: '兔子', price: 80, happiness: 70, emoji: '🐰', foodCost: 2, income: 6, shelter: 'rabbitHutch' }),
+    };
+
+    this.buildings = {
+      barn: new Building('barn', { name: '穀倉', price: 1000, emoji: '🏚️', description: '容納牛羊，提升產量', boost: 1.2 }),
+      chickenCoop: new Building('chickenCoop', { name: '雞舍', price: 500, emoji: '🏠', description: '專門養雞，提升產蛋率', boost: 1.3 }),
+      dogHouse: new Building('dogHouse', { name: '狗屋', price: 300, emoji: '🏘️', description: '狗狗的溫馨小窩', boost: 1.1 }),
+      catHouse: new Building('catHouse', { name: '貓屋', price: 250, emoji: '🏡', description: '貓咪的舒適居所', boost: 1.1 }),
+      pigPen: new Building('pigPen', { name: '豬圈', price: 400, emoji: '🏗️', description: '豬豬的泥土樂園', boost: 1.2 }),
+      pond: new Building('pond', { name: '池塘', price: 600, emoji: '🌊', description: '水鳥的天堂', boost: 1.3 }),
+      rabbitHutch: new Building('rabbitHutch', { name: '兔籠', price: 200, emoji: '📦', description: '兔子的安全小屋', boost: 1.2 }),
+      greenhouse: new Building('greenhouse', { name: '溫室', price: 2000, emoji: '🏢', description: '不受天氣影響的種植空間', boost: 1.5 }),
+      silo: new Building('silo', { name: '筒倉', price: 800, emoji: '🗼', description: '儲存更多作物', boost: 1.0 }),
+      windmill: new Building('windmill', { name: '風車', price: 1500, emoji: '🌪️', description: '產生額外收入', boost: 1.0 }),
+      well: new Building('well', { name: '水井', price: 400, emoji: '🕳️', description: '無限澆水，節省體力', boost: 1.0 }),
+    };
+
+    this.tools = {
+      basic: new Tool('basic', { name: '基本工具', energyReduction: 0, speedBoost: 1, price: 0 }),
+      iron: new Tool('iron', { name: '鐵製工具', energyReduction: 2, speedBoost: 1.2, price: 500 }),
+      steel: new Tool('steel', { name: '鋼製工具', energyReduction: 4, speedBoost: 1.5, price: 1200 }),
+      magic: new Tool('magic', { name: '魔法工具', energyReduction: 6, speedBoost: 2, price: 3000 }),
+    };
+
+    this.achievements = [
+      new Achievement({ id: 'firstPlant', name: '初次種植', description: '種下第一株作物', reward: 100, icon: '🌱' }),
+      new Achievement({ id: 'richFarmer', name: '富豪農夫', description: '擁有10000金幣', reward: 500, icon: '💰' }),
+      new Achievement({ id: 'animalLover', name: '動物愛好者', description: '擁有10隻動物', reward: 300, icon: '🐾' }),
+      new Achievement({ id: 'builder', name: '建築大師', description: '建造5個建築', reward: 800, icon: '🏗️' }),
+      new Achievement({ id: 'levelUp', name: '經驗老手', description: '達到等級10', reward: 1000, icon: '⭐' }),
+      new Achievement({ id: 'weatherMaster', name: '天氣專家', description: '在所有天氣下收成作物', reward: 600, icon: '🌦️' }),
+    ];
+
+    this.npcs = [
+      new NPC({
+        name: '農夫老張',
+        emoji: '👨‍🌾',
+        dialogue: ['今天天氣真好呢！', '記得給作物澆水哦！', '我這裡有些好種子...'],
+        quests: [{ type: 'plant', target: 'carrot', count: 5, reward: 200 }],
+      }),
+      new NPC({
+        name: '商人小李',
+        emoji: '👨‍💼',
+        dialogue: ['生意興隆！', '需要什麼嗎？', '我有特價商品！'],
+        quests: [{ type: 'sell', target: 'tomato', count: 10, reward: 300 }],
+      }),
+    ];
+  }
+
+  getCrop(key) {
+    return this.crops[key];
+  }
+
+  getAnimal(key) {
+    return this.animals[key];
+  }
+
+  getBuilding(key) {
+    return this.buildings[key];
+  }
+
+  getTool(key) {
+    return this.tools[key];
+  }
+}
+
+export const WEATHER_TYPES = ['sunny', 'rainy', 'cloudy', 'storm', 'snow'];
+export const SEASONS = ['spring', 'summer', 'autumn', 'winter'];
+
+export const catalog = new GameCatalog();
+export const CROPS = catalog.crops;
+export const ANIMALS = catalog.animals;
+export const BUILDINGS = catalog.buildings;
+export const TOOLS = catalog.tools;
+export const ACHIEVEMENTS = catalog.achievements;
+export const NPCS = catalog.npcs;
+
