@@ -76,17 +76,63 @@ export class GameEngine {
     return 0;
   }
 
-  buySeed(seedType) {
-    const { money, marketPrices } = this.state;
-    const price = (marketPrices && marketPrices[seedType]) || CROPS[seedType].price;
+  getSeedKey(seedType) {
+    return `seed_${seedType}`;
+  }
 
-    if (money >= price) {
-      this.setters.setSelectedSupply(null);
-      this.setters.setSelectedSeed(seedType);
-      this.setters.setShowShop(false);
-      this.notify(`準備種植 ${CROPS[seedType].name}，記得找到空地！`, { type: 'success' });
+  prepareSeed(seedType) {
+    const crop = CROPS[seedType];
+    if (!crop) {
+      this.notify('找不到這種種子。', { type: 'error' });
+      return;
+    }
+
+    const { money, marketPrices, inventory } = this.state;
+    const price = (marketPrices && marketPrices[seedType]) || crop.price;
+    const seedKey = this.getSeedKey(seedType);
+    const storedSeeds = inventory?.[seedKey] || 0;
+
+    if (storedSeeds <= 0 && money < price) {
+      this.notify('金錢不足，無法準備種植。', { type: 'error' });
+      return;
+    }
+
+    this.setters.setSelectedSupply(null);
+    this.setters.setSelectedSeed(seedType);
+    this.notify(`已準備 ${crop.emoji} ${crop.name} 種子，點擊空地即可種植。`, { type: 'success' });
+  }
+
+  purchaseSeeds(seedType, quantity = 1) {
+    const crop = CROPS[seedType];
+    if (!crop) {
+      this.notify('找不到這種種子。', { type: 'error' });
+      return;
+    }
+
+    const amount = Math.max(1, Math.floor(quantity));
+    const { money, marketPrices } = this.state;
+    const price = (marketPrices && marketPrices[seedType]) || crop.price;
+    const totalCost = price * amount;
+
+    if (money < totalCost) {
+      this.notify('金錢不足，無法購買種子。', { type: 'error' });
+      return;
+    }
+
+    const seedKey = this.getSeedKey(seedType);
+    this.setters.setMoney(prev => prev - totalCost);
+    this.setters.setInventory(prev => ({
+      ...prev,
+      [seedKey]: (prev?.[seedKey] || 0) + amount,
+    }));
+    this.notify(`購買了 ${amount} 包${crop.name}種子，已存入倉庫。`, { type: 'success' });
+  }
+
+  buySeed(seedType, options) {
+    if (options && typeof options.quantity === 'number') {
+      this.purchaseSeeds(seedType, options.quantity);
     } else {
-      this.notify('金錢不足！', { type: 'error' });
+      this.prepareSeed(seedType);
     }
   }
 
@@ -272,11 +318,17 @@ export class GameEngine {
   }
 
   plantSeed(plotId) {
-    const { selectedSeed, tools, buildings, energy, money, marketPrices } = this.state;
+    const { selectedSeed, tools, buildings, energy, money, marketPrices, inventory, season, farm } = this.state;
     if (!selectedSeed) return;
 
     const price = (marketPrices && marketPrices[selectedSeed]) || CROPS[selectedSeed].price;
-    if (money < price) {
+    const seedKey = this.getSeedKey(selectedSeed);
+    const storedSeeds = inventory?.[seedKey] || 0;
+    const usingStoredSeed = storedSeeds > 0;
+    const existingPlot = Array.isArray(farm) ? farm.find(plot => plot.id === plotId) : null;
+    const isGreenhousePlot = existingPlot?.greenhouse;
+
+    if (!usingStoredSeed && money < price) {
       this.notify('金錢不足，無法種植！', { type: 'error' });
       return;
     }
@@ -301,16 +353,36 @@ export class GameEngine {
       return;
     }
 
-    this.setters.setMoney(prev => prev - price);
+    if (usingStoredSeed) {
+      this.setters.setInventory(prev => ({
+        ...prev,
+        [seedKey]: Math.max(0, (prev?.[seedKey] || 0) - 1),
+      }));
+    } else {
+      this.setters.setMoney(prev => prev - price);
+    }
+
     this.setters.setEnergy(prev => Math.max(0, prev - energyCost));
     this.setters.setExperience(prev => prev + 5);
     this.setters.setSelectedSeed(null);
     this.setters.setSelectedSupply(null);
-    this.notify(`種植了 ${CROPS[selectedSeed].name}！`, { type: 'success' });
+    const crop = CROPS[selectedSeed];
+    if (crop?.seasonBonus) {
+      const seasonBoost = isGreenhousePlot ? 1 : (crop.seasonBonus[season] ?? 1);
+      if (seasonBoost > 1.05) {
+        this.notify(`種植了 ${crop.name}！這個季節特別適合，成長速度更快！`, { type: 'success' });
+      } else if (seasonBoost < 0.9) {
+        this.notify(`種植了 ${crop.name}，但這個季節氣候不利，成長會較慢。`, { type: 'warning' });
+      } else {
+        this.notify(`種植了 ${crop.name}！`, { type: 'success' });
+      }
+    } else {
+      this.notify(`種植了 ${crop?.name || selectedSeed}！`, { type: 'success' });
+    }
   }
 
   harvestCrop(plotId) {
-    const { farm, marketPrices, buildings } = this.state;
+    const { farm, marketPrices, buildings, season } = this.state;
     const plot = farm.find(p => p.id === plotId);
     if (!plot || !plot.ready) return;
 
@@ -321,6 +393,11 @@ export class GameEngine {
     if (plot.watered) bonus *= 1.2;
     if (plot.greenhouse) bonus *= 1.5;
     if (buildings?.silo) bonus *= 1.1;
+    const cropInfo = CROPS[crop];
+    if (cropInfo?.seasonBonus) {
+      const seasonBoost = cropInfo.seasonBonus[season] ?? 1;
+      bonus *= seasonBoost;
+    }
 
     const sellPrice = Math.floor(basePrice * bonus);
 
@@ -399,6 +476,41 @@ export class GameEngine {
       this.notify(`購買了 ${animal.emoji} ${animal.name}！`, { type: 'success' });
     } else {
       this.notify('金錢不足！', { type: 'error' });
+    }
+  }
+
+  slaughterAnimal(animalId) {
+    const { animals } = this.state;
+    if (!Array.isArray(animals) || animals.length === 0) {
+      this.notify('目前沒有可處理的動物。', { type: 'info' });
+      return;
+    }
+
+    const animal = animals.find(a => a.id === animalId);
+    if (!animal) {
+      this.notify('找不到這隻動物。', { type: 'error' });
+      return;
+    }
+
+    const animalData = ANIMALS[animal.type];
+    const butcher = animalData?.butcher;
+    if (!butcher || !butcher.product) {
+      this.notify('這類動物無法進行屠宰。', { type: 'warning' });
+      return;
+    }
+
+    const product = ANIMAL_PRODUCTS[butcher.product];
+    const amount = Math.max(1, Math.floor(butcher.amount || 1));
+
+    this.setters.setAnimals(prev => prev.filter(a => a.id !== animalId));
+    if (product) {
+      this.setters.setInventory(prev => ({
+        ...prev,
+        [product.key]: (prev?.[product.key] || 0) + amount,
+      }));
+      this.notify(`已將 ${animal.name} 屠宰並獲得 ${product.name} x${amount}。`, { type: 'warning' });
+    } else {
+      this.notify(`已將 ${animal.name} 屠宰。`, { type: 'warning' });
     }
   }
 
@@ -508,25 +620,59 @@ export class GameEngine {
   }
 
   buyTool(toolType) {
-    const { money, tools } = this.state;
+    const { money, tools, ownedTools } = this.state;
     const tool = TOOLS[toolType];
-
-    if (tools === toolType) return;
-
-    if (money >= tool.price) {
-      this.setters.setMoney(prev => prev - tool.price);
-      this.setters.setTools(toolType);
-      this.setters.setShowToolShop(false);
-      this.notify(`升級工具：${tool.name}！`, { type: 'success' });
-    } else {
-      this.notify('金錢不足！', { type: 'error' });
+    if (!tool) {
+      this.notify('找不到這項工具。', { type: 'error' });
+      return;
     }
+
+    const ownedSet = new Set(Array.isArray(ownedTools) ? ownedTools : []);
+    if (ownedSet.has(toolType)) {
+      if (tools === toolType) {
+        this.notify('已經裝備這項工具囉！', { type: 'info' });
+      } else {
+        this.setters.setTools(toolType);
+        this.notify(`切換為 ${tool.name}。`, { type: 'success' });
+      }
+      this.setters.setShowToolShop(false);
+      return;
+    }
+
+    if (money < tool.price) {
+      this.notify('金錢不足！', { type: 'error' });
+      return;
+    }
+
+    this.setters.setMoney(prev => prev - tool.price);
+    this.setters.setTools(toolType);
+    if (typeof this.setters.setOwnedTools === 'function') {
+      this.setters.setOwnedTools(prev => {
+        const prevList = Array.isArray(prev) ? prev : [];
+        if (prevList.includes(toolType)) {
+          return prevList;
+        }
+        return [...prevList, toolType];
+      });
+    }
+    this.setters.setShowToolShop(false);
+    this.notify(`購買並裝備 ${tool.name}！`, { type: 'success' });
   }
 
   getInventorySaleValue(itemKey, quantity) {
     const count = quantity ?? (this.state.inventory?.[itemKey] || 0);
     if (!count || count <= 0) {
       return 0;
+    }
+
+    if (itemKey.startsWith('seed_')) {
+      const cropKey = itemKey.replace('seed_', '');
+      const crop = CROPS[cropKey];
+      if (!crop) {
+        return 0;
+      }
+      const price = (this.state.marketPrices && this.state.marketPrices[cropKey]) || crop.price;
+      return Math.max(0, Math.floor(price * count));
     }
 
     if (CROPS[itemKey]) {
@@ -586,6 +732,14 @@ export class GameEngine {
     }));
 
     this.setters.setMoney(prev => prev + saleValue);
+
+    if (itemKey.startsWith('seed_')) {
+      const cropKey = itemKey.replace('seed_', '');
+      const crop = CROPS[cropKey];
+      const label = crop ? crop.name : cropKey;
+      this.notify(`出售了 ${amountToSell} 包${label}種子，獲得 $${saleValue}！`, { type: 'success' });
+      return;
+    }
 
     const product = ANIMAL_PRODUCTS[itemKey];
     if (product) {

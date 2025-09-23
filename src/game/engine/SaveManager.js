@@ -3,8 +3,14 @@ import { BASE_ANIMAL_CAPACITY, MAX_ANIMAL_CAPACITY, BASE_FARM_PLOTS, MAX_FARM_PL
 
 const createDefaultInventory = () => {
   const inventory = {};
-  [...Object.keys(CROPS), ...Object.keys(ANIMAL_PRODUCTS)].forEach(key => {
+  Object.keys(CROPS).forEach(key => {
     inventory[key] = 0;
+    inventory[`seed_${key}`] = 0;
+  });
+  Object.keys(ANIMAL_PRODUCTS).forEach(key => {
+    if (!(key in inventory)) {
+      inventory[key] = 0;
+    }
   });
   return inventory;
 };
@@ -82,6 +88,7 @@ export class SaveManager {
       selectedSupply,
       animalCapacity,
       questLog,
+      ownedTools,
     } = this.state;
 
     const safeFarm = Array.isArray(farm) ? farm : [];
@@ -116,6 +123,7 @@ export class SaveManager {
       selectedSupply: selectedSupply || null,
       animalCapacity: Math.max(animalCapacity || BASE_ANIMAL_CAPACITY, BASE_ANIMAL_CAPACITY),
       questLog: questLog || {},
+      ownedTools: Array.isArray(ownedTools) ? ownedTools : Array.from(ownedTools || []),
       saveTime: new Date().toISOString(),
       version: '1.1',
     };
@@ -161,6 +169,20 @@ export class SaveManager {
     this.setters.setWeatherDuration(gameState.weatherDuration || 5);
     this.setters.setInventory(withInventoryDefaults(gameState.inventory));
     this.setters.setQuestLog(gameState.questLog ? { ...gameState.questLog } : {});
+    if (typeof this.setters.setOwnedTools === 'function') {
+      const owned = Array.isArray(gameState.ownedTools)
+        ? gameState.ownedTools
+        : (typeof gameState.tools === 'string' ? [gameState.tools] : []);
+      const baseTool = gameState.tools || 'basic';
+      const normalizedOwned = owned.length > 0 ? [...owned] : [baseTool];
+      if (!normalizedOwned.includes(baseTool)) {
+        normalizedOwned.push(baseTool);
+      }
+      if (!normalizedOwned.includes('basic')) {
+        normalizedOwned.unshift('basic');
+      }
+      this.setters.setOwnedTools(normalizedOwned);
+    }
     const sanitizedFarm = Array.isArray(gameState.farm)
       ? gameState.farm.map((plot, index) => ({
           id: plot.id ?? index,

@@ -6,9 +6,28 @@ import { GameEngine, getFarmExpansionCost, getAnimalHousingExpansionCost, BASE_F
 import { SaveManager } from './game/engine/SaveManager';
 import { NotificationCenter } from './game/engine/NotificationCenter';
 
+const CROP_METADATA = Object.fromEntries(
+  Object.entries(CROPS).map(([key, crop]) => [key, { name: crop.name, emoji: crop.emoji, type: 'crop', cropKey: key }])
+);
+
+const SEED_METADATA = Object.fromEntries(
+  Object.entries(CROPS).map(([key, crop]) => [
+    `seed_${key}`,
+    { name: `${crop.name}種子`, emoji: crop.emoji, type: 'seed', cropKey: key },
+  ])
+);
+
+const PRODUCT_METADATA = Object.fromEntries(
+  Object.entries(ANIMAL_PRODUCTS).map(([key, product]) => [
+    key,
+    { name: product.name, emoji: product.emoji, type: 'product', animal: product.animal },
+  ])
+);
+
 const INVENTORY_METADATA = {
-  ...Object.fromEntries(Object.entries(CROPS).map(([key, crop]) => [key, { name: crop.name, emoji: crop.emoji, type: 'crop' }])),
-  ...Object.fromEntries(Object.entries(ANIMAL_PRODUCTS).map(([key, product]) => [key, { name: product.name, emoji: product.emoji, type: 'product' }])),
+  ...CROP_METADATA,
+  ...PRODUCT_METADATA,
+  ...SEED_METADATA,
 };
 
 const INVENTORY_ORDER = Object.keys(INVENTORY_METADATA);
@@ -62,6 +81,7 @@ const FarmGame = () => {
   const [animalCapacity, setAnimalCapacity] = useState(BASE_ANIMAL_CAPACITY);
   const [buildings, setBuildings] = useState({});
   const [tools, setTools] = useState('basic');
+  const [ownedTools, setOwnedTools] = useState(() => ['basic']);
 
   // UI狀態
   const [selectedSeed, setSelectedSeed] = useState(null);
@@ -180,6 +200,7 @@ const FarmGame = () => {
     animalCapacity,
     buildings,
     tools,
+    ownedTools,
     completedAchievements,
     dailyStats,
     automation,
@@ -214,6 +235,7 @@ const FarmGame = () => {
       setAnimalCapacity,
       setBuildings,
       setTools,
+      setOwnedTools,
       setFarmSupplies,
       setQuestLog,
       setCompletedAchievements,
@@ -330,6 +352,7 @@ const FarmGame = () => {
       setShowBuildingShop,
       setTools,
       setShowToolShop,
+      setOwnedTools,
       setPendingGreenhousePlacement,
       recordQuestEvent,
     },
@@ -1156,10 +1179,12 @@ const FarmGame = () => {
           const cropData = CROPS[plot.crop];
 
           let weatherMultiplier = plot.greenhouse ? 1.2 : (cropData.weatherBonus[weather] || 1);
+          const seasonMultiplier = plot.greenhouse ? 1 : (cropData.seasonBonus?.[season] ?? 1);
           const toolMultiplier = TOOLS[tools].speedBoost;
           const fertilizerBoost = plot.fertilized ? 1.25 : 1;
 
-          const adjustedGrowTime = (cropData.growTime * 60000) / (weatherMultiplier * toolMultiplier * fertilizerBoost);
+          const adjustedGrowTime = (cropData.growTime * 60000)
+            / (weatherMultiplier * toolMultiplier * fertilizerBoost * seasonMultiplier);
 
           if (now - plot.plantTime >= adjustedGrowTime && !plot.ready) {
             addNotification(`${cropData.emoji} ${cropData.name} 成熟了！`, { type: 'success' });
@@ -1171,7 +1196,7 @@ const FarmGame = () => {
     }, 5000);
 
     return () => clearInterval(growTimer);
-  }, [weather, tools, addNotification]);
+  }, [weather, tools, season, addNotification]);
 
   // 升級系統
   useEffect(() => {
@@ -1182,8 +1207,12 @@ const FarmGame = () => {
     }
   }, [experience, level, addNotification]);
 
-  const buySeed = useCallback((seedType) => {
-    gameEngine.buySeed(seedType);
+  const prepareSeed = useCallback((seedType) => {
+    gameEngine.prepareSeed(seedType);
+  }, [gameEngine]);
+
+  const purchaseSeeds = useCallback((seedType, quantity) => {
+    gameEngine.purchaseSeeds(seedType, quantity);
   }, [gameEngine]);
 
   const plantSeed = useCallback((plotId) => {
@@ -1228,6 +1257,10 @@ const FarmGame = () => {
 
   const buyTool = useCallback((toolType) => {
     gameEngine.buyTool(toolType);
+  }, [gameEngine]);
+
+  const slaughterAnimal = useCallback((animalId) => {
+    gameEngine.slaughterAnimal(animalId);
   }, [gameEngine]);
 
   const feedAnimal = useCallback((animalId) => {
@@ -1606,6 +1639,14 @@ const FarmGame = () => {
                               <div className="text-xs text-red-500">身體不適，產出暫停中。</div>
                             </div>
                           )}
+                          {animalData.butcher && (
+                            <button
+                              onClick={() => slaughterAnimal(animal.id)}
+                              className="w-full text-xs font-semibold py-1 rounded transition-colors bg-red-200 hover:bg-red-300 text-red-700 mt-2"
+                            >
+                              屠宰換取 {ANIMAL_PRODUCTS[animalData.butcher.product]?.name || '肉品'}
+                            </button>
+                          )}
                         </div>
                       </div>
                     );
@@ -1934,7 +1975,7 @@ const FarmGame = () => {
                     <Boxes className="w-4 h-4 text-amber-600" />
                     庫存
                   </h3>
-                  <p className="text-xs text-gray-500 mt-1">動物產品與作物收成都集中在這裡管理。</p>
+                  <p className="text-xs text-gray-500 mt-1">作物、畜產品與囤積的種子都會統一列在這裡。</p>
                 </div>
                 <div className="text-right text-xs">
                   <div className="text-gray-500">共 {inventoryInsights.totalCount} 件</div>
@@ -1965,6 +2006,12 @@ const FarmGame = () => {
                   {inventoryInsights.items.map(item => {
                     const halfQuantity = Math.floor(item.count / 2);
                     const shareWidth = item.share > 0 ? Math.min(100, Math.max(6, item.share)) : 0;
+                    const typeLabel = item.type === 'seed'
+                      ? '種子'
+                      : item.type === 'product'
+                        ? '畜產品'
+                        : '作物';
+                    const valueLabel = item.type === 'seed' ? '估值' : '單價';
 
                     return (
                       <div key={item.key} className="rounded-lg border border-amber-200 bg-amber-50/80 p-3">
@@ -1974,7 +2021,7 @@ const FarmGame = () => {
                             <div>
                               <div className="font-semibold text-sm text-amber-900">{item.name}</div>
                               <div className="text-xs text-amber-700">
-                                {item.type === 'product' ? '畜產品' : '作物'} · 單價 ${item.unitValue}
+                                {typeLabel} · {valueLabel} ${item.unitValue}
                               </div>
                             </div>
                           </div>
@@ -2072,6 +2119,12 @@ const FarmGame = () => {
                     <div>{CROPS[selectedSeed].name}</div>
                     <div className="text-sm text-gray-600">
                       成長時間: {CROPS[selectedSeed].growTime}分鐘
+                    </div>
+                    <div className="text-sm text-gray-600">
+                      倉庫種子: {inventory[`seed_${selectedSeed}`] || 0} 包
+                    </div>
+                    <div className="text-xs text-gray-500">
+                      無庫存時植入需花費 ${marketPrices[selectedSeed] || CROPS[selectedSeed].price}
                     </div>
                   </div>
                 </div>
@@ -2182,25 +2235,61 @@ const FarmGame = () => {
           <div className="bg-white rounded-lg p-6 max-w-2xl w-full mx-4 max-h-96 overflow-y-auto">
             <h2 className="text-xl font-bold mb-4">種子商店</h2>
             <div className="grid grid-cols-3 gap-4">
-              {Object.entries(CROPS).map(([key, crop]) => (
-                <div key={key} 
-                     className="border rounded-lg p-4 cursor-pointer hover:bg-gray-50 transition-colors"
-                     onClick={() => buySeed(key)}>
-                  <div className="text-center">
-                    <div className="text-3xl mb-2">{crop.emoji}</div>
-                    <div className="font-semibold">{crop.name}</div>
-                    <div className="text-green-600 font-bold">
-                      ${marketPrices[key] || crop.price}
+              {Object.entries(CROPS).map(([key, crop]) => {
+                const price = marketPrices[key] || crop.price;
+                const seedKey = `seed_${key}`;
+                const storedSeeds = inventory[seedKey] || 0;
+                const seasonEntries = Object.entries(crop.seasonBonus || {});
+                const favorableSeasons = seasonEntries
+                  .filter(([, value]) => value > 1.05)
+                  .map(([seasonKey]) => GameFormatter.seasonName(seasonKey));
+                const riskySeasons = seasonEntries
+                  .filter(([, value]) => value < 0.9)
+                  .map(([seasonKey]) => GameFormatter.seasonName(seasonKey));
+
+                return (
+                  <div key={key}
+                       className="border rounded-lg p-4 bg-white/90 shadow-sm flex flex-col gap-3">
+                    <div className="text-center space-y-1">
+                      <div className="text-3xl">{crop.emoji}</div>
+                      <div className="font-semibold">{crop.name}</div>
+                      <div className="text-green-600 font-bold">${price}</div>
+                      <div className="text-xs text-gray-500">成長: {crop.growTime}分鐘</div>
+                      <div className="text-xs text-blue-600">基礎售價: ${crop.sellPrice}</div>
+                      <div className="text-xs text-amber-600">種子庫存: {storedSeeds} 包</div>
+                      {favorableSeasons.length > 0 && (
+                        <div className="text-[11px] text-emerald-600">適合季節：{favorableSeasons.join('、')}</div>
+                      )}
+                      {riskySeasons.length > 0 && (
+                        <div className="text-[11px] text-rose-500">避免季節：{riskySeasons.join('、')}</div>
+                      )}
                     </div>
-                    <div className="text-xs text-gray-500">
-                      成長: {crop.growTime}分鐘
-                    </div>
-                    <div className="text-xs text-blue-600">
-                      基礎售價: ${crop.sellPrice}
+                    <div className="space-y-2">
+                      <button
+                        onClick={() => {
+                          prepareSeed(key);
+                          setShowShop(false);
+                        }}
+                        className="w-full text-sm bg-green-500 hover:bg-green-600 text-white py-1.5 rounded transition-colors"
+                      >
+                        準備種植
+                      </button>
+                      <div className="text-[11px] text-gray-500 text-center">大量進貨可趁特價</div>
+                      <div className="flex gap-2">
+                        {[1, 5, 10].map(amount => (
+                          <button
+                            key={amount}
+                            onClick={() => purchaseSeeds(key, amount)}
+                            className="flex-1 text-xs border border-green-200 hover:border-green-400 text-green-700 rounded py-1 transition-colors"
+                          >
+                            買 {amount}
+                          </button>
+                        ))}
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
             <button onClick={() => setShowShop(false)}
                     className="mt-4 w-full bg-gray-500 hover:bg-gray-600 text-white py-2 px-4 rounded transition-colors">
@@ -2315,32 +2404,48 @@ const FarmGame = () => {
           <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
             <h2 className="text-xl font-bold mb-4">工具商店</h2>
             <div className="space-y-4">
-              {Object.entries(TOOLS).map(([key, tool]) => (
-                <div key={key} 
-                     className={`border rounded-lg p-4 cursor-pointer transition-colors ${
-                       tools === key 
-                         ? 'bg-green-100 border-green-400' 
-                         : 'hover:bg-gray-50'
-                     }`}
-                     onClick={() => buyTool(key)}>
-                  <div className="flex justify-between items-center">
-                    <div>
-                      <div className="font-semibold">{tool.name}</div>
-                      <div className="text-sm text-gray-600">
-                        節省體力: {tool.energyReduction}
+              {Object.entries(TOOLS).map(([key, tool]) => {
+                const isActive = tools === key;
+                const isOwned = ownedTools.includes(key);
+                const cardClass = isActive
+                  ? 'bg-green-100 border-green-400'
+                  : isOwned
+                    ? 'border-blue-300 bg-blue-50/60 hover:bg-blue-100'
+                    : 'hover:bg-gray-50';
+                const priceLabel = isActive
+                  ? '已裝備'
+                  : isOwned
+                    ? '已購買'
+                    : tool.price === 0
+                      ? '免費'
+                      : `${tool.price}`;
+
+                return (
+                  <div key={key}
+                       className={`border rounded-lg p-4 cursor-pointer transition-colors ${cardClass}`}
+                       onClick={() => buyTool(key)}>
+                    <div className="flex justify-between items-center">
+                      <div>
+                        <div className="font-semibold">{tool.name}</div>
+                        <div className="text-sm text-gray-600">
+                          節省體力: {tool.energyReduction}
+                        </div>
+                        <div className="text-sm text-gray-600">
+                          速度加成: {Math.round(tool.speedBoost * 100)}%
+                        </div>
                       </div>
-                      <div className="text-sm text-gray-600">
-                        速度加成: {Math.round(tool.speedBoost * 100)}%
-                      </div>
-                    </div>
-                    <div className="text-right">
-                      <div className={`font-bold ${tools === key ? 'text-green-600' : 'text-blue-600'}`}>
-                        {tools === key ? '已擁有' : tool.price === 0 ? '免費' : `${tool.price}`}
+                      <div className="text-right">
+                        <div className={`font-bold ${isActive ? 'text-green-600' : isOwned ? 'text-blue-600' : 'text-blue-600'}`}>
+                          {priceLabel}
+                        </div>
+                        {isOwned && !isActive && (
+                          <div className="text-[11px] text-blue-500">點擊切換</div>
+                        )}
                       </div>
                     </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
             <button onClick={() => setShowToolShop(false)}
                     className="mt-4 w-full bg-gray-500 hover:bg-gray-600 text-white py-2 px-4 rounded transition-colors">

@@ -8,7 +8,7 @@ class BaseEntity {
 }
 
 class Crop extends BaseEntity {
-  constructor(key, { name, price, growTime, sellPrice, emoji, weatherBonus }) {
+  constructor(key, { name, price, growTime, sellPrice, emoji, weatherBonus, seasonBonus }) {
     super(key);
     this.name = name;
     this.price = price;
@@ -16,11 +16,12 @@ class Crop extends BaseEntity {
     this.sellPrice = sellPrice;
     this.emoji = emoji;
     this.weatherBonus = weatherBonus;
+    this.seasonBonus = seasonBonus || {};
   }
 }
 
 class Animal extends BaseEntity {
-  constructor(key, { name, price, happiness, emoji, foodCost, income, shelter, product }) {
+  constructor(key, { name, price, happiness, emoji, foodCost, income, shelter, product, butcher }) {
     super(key);
     this.name = name;
     this.price = price;
@@ -30,6 +31,7 @@ class Animal extends BaseEntity {
     this.income = income;
     this.shelter = shelter;
     this.product = product;
+    this.butcher = butcher;
   }
 }
 
@@ -86,23 +88,100 @@ class Supply extends BaseEntity {
 class GameCatalog {
   constructor() {
     this.crops = {
-      carrot: new Crop('carrot', { name: '胡蘿蔔', price: 10, growTime: 5, sellPrice: 25, emoji: '🥕', weatherBonus: { sunny: 1.2, rainy: 1.0, snow: 0.8 } }),
-      corn: new Crop('corn', { name: '玉米', price: 20, growTime: 8, sellPrice: 50, emoji: '🌽', weatherBonus: { sunny: 1.3, rainy: 1.1, snow: 0.6 } }),
-      tomato: new Crop('tomato', { name: '番茄', price: 15, growTime: 6, sellPrice: 35, emoji: '🍅', weatherBonus: { sunny: 1.4, rainy: 0.9, snow: 0.5 } }),
-      wheat: new Crop('wheat', { name: '小麥', price: 8, growTime: 4, sellPrice: 20, emoji: '🌾', weatherBonus: { sunny: 1.1, rainy: 1.2, snow: 0.9 } }),
-      potato: new Crop('potato', { name: '馬鈴薯', price: 12, growTime: 7, sellPrice: 30, emoji: '🥔', weatherBonus: { sunny: 1.0, rainy: 1.3, snow: 1.1 } }),
-      strawberry: new Crop('strawberry', { name: '草莓', price: 25, growTime: 10, sellPrice: 60, emoji: '🍓', weatherBonus: { sunny: 1.2, rainy: 0.8, snow: 0.4 } }),
+      carrot: new Crop('carrot', {
+        name: '胡蘿蔔',
+        price: 10,
+        growTime: 5,
+        sellPrice: 25,
+        emoji: '🥕',
+        weatherBonus: { sunny: 1.2, rainy: 1.0, snow: 0.8 },
+        seasonBonus: { spring: 1.15, summer: 0.9, autumn: 1.2, winter: 0.7 },
+      }),
+      corn: new Crop('corn', {
+        name: '玉米',
+        price: 20,
+        growTime: 8,
+        sellPrice: 50,
+        emoji: '🌽',
+        weatherBonus: { sunny: 1.3, rainy: 1.1, snow: 0.6 },
+        seasonBonus: { spring: 0.85, summer: 1.25, autumn: 1.05, winter: 0.55 },
+      }),
+      tomato: new Crop('tomato', {
+        name: '番茄',
+        price: 15,
+        growTime: 6,
+        sellPrice: 35,
+        emoji: '🍅',
+        weatherBonus: { sunny: 1.4, rainy: 0.9, snow: 0.5 },
+        seasonBonus: { spring: 1.0, summer: 1.3, autumn: 0.85, winter: 0.5 },
+      }),
+      wheat: new Crop('wheat', {
+        name: '小麥',
+        price: 8,
+        growTime: 4,
+        sellPrice: 20,
+        emoji: '🌾',
+        weatherBonus: { sunny: 1.1, rainy: 1.2, snow: 0.9 },
+        seasonBonus: { spring: 1.05, summer: 1.1, autumn: 1.25, winter: 0.85 },
+      }),
+      potato: new Crop('potato', {
+        name: '馬鈴薯',
+        price: 12,
+        growTime: 7,
+        sellPrice: 30,
+        emoji: '🥔',
+        weatherBonus: { sunny: 1.0, rainy: 1.3, snow: 1.1 },
+        seasonBonus: { spring: 0.95, summer: 1.1, autumn: 1.35, winter: 0.95 },
+      }),
+      strawberry: new Crop('strawberry', {
+        name: '草莓',
+        price: 25,
+        growTime: 10,
+        sellPrice: 60,
+        emoji: '🍓',
+        weatherBonus: { sunny: 1.2, rainy: 0.8, snow: 0.4 },
+        seasonBonus: { spring: 1.35, summer: 1.1, autumn: 0.75, winter: 0.4 },
+      }),
     };
 
     this.animals = {
-      dog: new Animal('dog', { name: '狗狗', price: 200, happiness: 50, emoji: '🐕', foodCost: 5, income: 8, shelter: 'dogHouse' }),
-      cat: new Animal('cat', { name: '貓咪', price: 150, happiness: 60, emoji: '🐱', foodCost: 3, income: 5, shelter: 'catHouse' }),
-      chicken: new Animal('chicken', { name: '雞', price: 100, happiness: 40, emoji: '🐔', foodCost: 2, income: 12, shelter: 'chickenCoop', product: 'egg' }),
-      cow: new Animal('cow', { name: '牛', price: 500, happiness: 30, emoji: '🐄', foodCost: 10, income: 25, shelter: 'barn', product: 'milk' }),
-      pig: new Animal('pig', { name: '豬', price: 300, happiness: 45, emoji: '🐷', foodCost: 8, income: 18, shelter: 'pigPen' }),
-      sheep: new Animal('sheep', { name: '羊', price: 250, happiness: 40, emoji: '🐑', foodCost: 6, income: 15, shelter: 'barn' }),
-      duck: new Animal('duck', { name: '鴨子', price: 120, happiness: 55, emoji: '🦆', foodCost: 3, income: 10, shelter: 'pond' }),
-      rabbit: new Animal('rabbit', { name: '兔子', price: 80, happiness: 70, emoji: '🐰', foodCost: 2, income: 6, shelter: 'rabbitHutch' }),
+      dog: new Animal('dog', { name: '狗狗', price: 200, happiness: 50, emoji: '🐕', foodCost: 5, income: 10, shelter: 'dogHouse' }),
+      cat: new Animal('cat', { name: '貓咪', price: 150, happiness: 60, emoji: '🐱', foodCost: 3, income: 7, shelter: 'catHouse' }),
+      chicken: new Animal('chicken', {
+        name: '雞',
+        price: 100,
+        happiness: 40,
+        emoji: '🐔',
+        foodCost: 2,
+        income: 18,
+        shelter: 'chickenCoop',
+        product: 'egg',
+        butcher: { product: 'chickenMeat', amount: 1 },
+      }),
+      cow: new Animal('cow', {
+        name: '牛',
+        price: 500,
+        happiness: 30,
+        emoji: '🐄',
+        foodCost: 10,
+        income: 40,
+        shelter: 'barn',
+        product: 'milk',
+        butcher: { product: 'beef', amount: 1 },
+      }),
+      pig: new Animal('pig', {
+        name: '豬',
+        price: 300,
+        happiness: 45,
+        emoji: '🐷',
+        foodCost: 8,
+        income: 30,
+        shelter: 'pigPen',
+        butcher: { product: 'pork', amount: 1 },
+      }),
+      sheep: new Animal('sheep', { name: '羊', price: 250, happiness: 40, emoji: '🐑', foodCost: 6, income: 18, shelter: 'barn' }),
+      duck: new Animal('duck', { name: '鴨子', price: 120, happiness: 55, emoji: '🦆', foodCost: 3, income: 14, shelter: 'pond' }),
+      rabbit: new Animal('rabbit', { name: '兔子', price: 80, happiness: 70, emoji: '🐰', foodCost: 2, income: 8, shelter: 'rabbitHutch' }),
     };
 
     this.buildings = {
@@ -148,8 +227,11 @@ class GameCatalog {
     };
 
     this.animalProducts = {
-      egg: { key: 'egg', name: '雞蛋', emoji: '🥚', basePrice: 10, animal: 'chicken' },
-      milk: { key: 'milk', name: '鮮奶', emoji: '🥛', basePrice: 20, animal: 'cow' },
+      egg: { key: 'egg', name: '雞蛋', emoji: '🥚', basePrice: 14, animal: 'chicken' },
+      milk: { key: 'milk', name: '鮮奶', emoji: '🥛', basePrice: 35, animal: 'cow' },
+      chickenMeat: { key: 'chickenMeat', name: '雞肉', emoji: '🍗', basePrice: 95, animal: 'chicken' },
+      beef: { key: 'beef', name: '牛肉', emoji: '🥩', basePrice: 220, animal: 'cow' },
+      pork: { key: 'pork', name: '豬肉', emoji: '🍖', basePrice: 160, animal: 'pig' },
     };
 
     this.achievements = [
