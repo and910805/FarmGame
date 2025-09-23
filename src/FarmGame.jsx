@@ -36,7 +36,7 @@ const BUILDINGS = {
   greenhouse:   { name: '溫室',      price: 2000, emoji: '🏢', description: '不受天氣影響的種植空間', boost: 1.5 },
   silo:         { name: '筒倉',      price: 800,  emoji: '🗼', description: '儲存更多作物',      boost: 1.0 },
   windmill:     { name: '風車',      price: 1500, emoji: '🌪️', description: '產生額外收入',      boost: 1.0 },
-  well:         { name: '水井',      price: 400,  emoji: '🕳️', description: '無限澆水，節省體力', boost: 1.0 },
+  well:         { name: '水井',      price: 400,  emoji: '🕳️', description: '自動澆水，節省體力', boost: 1.0 },
 }
 
 const WEATHER_TYPES = ['sunny', 'rainy', 'cloudy', 'storm', 'snow']
@@ -171,9 +171,9 @@ const FarmGame = () => {
     return () => clearInterval(weatherTimer)
   }, [addNotification, speed])
 
-  /** -------- 時間系統（20s=1h，受 speed 影響） -------- */
+  /** -------- 時間系統（12.5s=1h，受 speed 影響） -------- */
   useEffect(() => {
-    const msPerHour = 20000 / speed
+    const msPerHour = 12500 / speed
     const timer = setInterval(() => {
       setTime(prev => {
         const newTime = prev + 1
@@ -227,6 +227,27 @@ const FarmGame = () => {
             const windmillIncome = 50
             setMoney(m => m + windmillIncome)
             addNotification(`🌪️ 風車產生了 $${windmillIncome}！`)
+          }
+
+          let hadCrop = false
+          let autoWatered = false
+          setFarm(prev => prev.map(plot => {
+            if (!plot.crop) return plot
+            hadCrop = true
+            if (buildings.well) {
+              if (!plot.watered) {
+                autoWatered = true
+                return { ...plot, watered: true }
+              }
+              return plot
+            }
+            if (plot.watered) {
+              return { ...plot, watered: false }
+            }
+            return plot
+          }))
+          if (buildings.well && hadCrop) {
+            addNotification(autoWatered ? '💧 水井在清晨自動灌溉所有作物！' : '💧 水井確保作物保持濕潤！')
           }
 
           return 6 // 早上 6 點
@@ -315,7 +336,7 @@ const FarmGame = () => {
 
     setFarm(prev => prev.map(p =>
       p.id === plotId && !p.crop
-        ? { ...p, crop: selectedSeed, plantTime: Date.now(), watered: false, fertilized: false, ready:false }
+        ? { ...p, crop: selectedSeed, plantTime: Date.now(), watered: Boolean(buildings.well), fertilized: false, ready:false }
         : p
     ))
     setSeedBag(b => ({ ...b, [selectedSeed]: b[selectedSeed]-1 }))
@@ -395,6 +416,22 @@ const FarmGame = () => {
     if (buildingType === 'greenhouse') {
       // 前 5 格變成溫室地塊
       setFarm(prev => prev.map((p, i) => i < 5 ? { ...p, greenhouse: true } : p))
+    }
+    if (buildingType === 'well') {
+      let hadCrop = false
+      let autoWatered = false
+      setFarm(prev => prev.map(plot => {
+        if (!plot.crop) return plot
+        hadCrop = true
+        if (!plot.watered) {
+          autoWatered = true
+          return { ...plot, watered: true }
+        }
+        return plot
+      }))
+      if (hadCrop) {
+        addNotification(autoWatered ? '💧 水井啟動，自動灌溉了現有作物！' : '💧 水井啟動，現有作物保持濕潤狀態！')
+      }
     }
     setShowBuildingShop(false)
     addNotification(`建造了 ${BUILDINGS[buildingType].emoji} ${BUILDINGS[buildingType].name}！`)

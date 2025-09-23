@@ -32,7 +32,7 @@ const BUILDINGS = {
   greenhouse: { name: '溫室', price: 2000, emoji: '🏢', description: '不受天氣影響的種植空間', boost: 1.5 },
   silo: { name: '筒倉', price: 800, emoji: '🗼', description: '儲存更多作物', boost: 1.0 },
   windmill: { name: '風車', price: 1500, emoji: '🌪️', description: '產生額外收入', boost: 1.0 },
-  well: { name: '水井', price: 400, emoji: '🕳️', description: '無限澆水，節省體力', boost: 1.0 }
+  well: { name: '水井', price: 400, emoji: '🕳️', description: '自動澆水，節省體力', boost: 1.0 }
 };
 
 const WEATHER_TYPES = ['sunny', 'rainy', 'cloudy', 'storm', 'snow'];
@@ -119,22 +119,22 @@ const FarmGame = () => {
             }
             return newDay;
           });
-          
+
           setEnergy(100);
-          
+
           // 動物每日收入和快樂度變化
           setAnimals(prev => prev.map(animal => {
             const building = buildings[ANIMALS[animal.type].shelter];
             const boost = building ? BUILDINGS[ANIMALS[animal.type].shelter].boost : 1;
             const income = Math.floor(ANIMALS[animal.type].income * boost * (animal.happiness / 100));
-            
+
             if (animal.happiness > 20) {
               setMoney(prevMoney => prevMoney + income);
               if (income > 0) {
                 addNotification(`${animal.name} 產生了 $${income}！`);
               }
             }
-            
+
             return {
               ...animal,
               happiness: Math.max(0, animal.happiness - 15)
@@ -147,15 +147,36 @@ const FarmGame = () => {
             setMoney(prev => prev + windmillIncome);
             addNotification(`🌪️ 風車產生了 $${windmillIncome}！`);
           }
-          
+
+          let hadCrop = false;
+          let autoWatered = false;
+          setFarm(prev => prev.map(plot => {
+            if (!plot.crop) return plot;
+            hadCrop = true;
+            if (buildings.well) {
+              if (!plot.watered) {
+                autoWatered = true;
+                return { ...plot, watered: true };
+              }
+              return plot;
+            }
+            if (plot.watered) {
+              return { ...plot, watered: false };
+            }
+            return plot;
+          }));
+          if (buildings.well && hadCrop) {
+            addNotification(autoWatered ? '💧 水井在清晨自動灌溉所有作物！' : '💧 水井確保作物保持濕潤！');
+          }
+
           return 6; // 早上6點開始
         }
         return newTime;
       });
-    }, 20000); // 20秒 = 1小時
+    }, 12500); // 12.5秒 = 1小時（24小時約5分鐘）
 
     return () => clearInterval(timer);
-  }, [season, buildings, animals]);
+  }, [season, buildings, animals, addNotification]);
 
   // 作物成長系統
   useEffect(() => {
@@ -243,9 +264,9 @@ const FarmGame = () => {
       return;
     }
     
-    setFarm(prev => prev.map(plot => 
+    setFarm(prev => prev.map(plot =>
       plot.id === plotId && !plot.crop
-        ? { ...plot, crop: selectedSeed, plantTime: Date.now(), watered: false, ready: false }
+        ? { ...plot, crop: selectedSeed, plantTime: Date.now(), watered: Boolean(buildings.well), ready: false }
         : plot
     ));
     
@@ -326,11 +347,28 @@ const FarmGame = () => {
       
       // 溫室建造後隨機選擇一些地塊變成溫室地塊
       if (buildingType === 'greenhouse') {
-        setFarm(prev => prev.map((plot, index) => 
+        setFarm(prev => prev.map((plot, index) =>
           index < 5 ? { ...plot, greenhouse: true } : plot
         ));
       }
-      
+
+      if (buildingType === 'well') {
+        let hadCrop = false;
+        let autoWatered = false;
+        setFarm(prev => prev.map(plot => {
+          if (!plot.crop) return plot;
+          hadCrop = true;
+          if (!plot.watered) {
+            autoWatered = true;
+            return { ...plot, watered: true };
+          }
+          return plot;
+        }));
+        if (hadCrop) {
+          addNotification(autoWatered ? '💧 水井啟動，自動灌溉了現有作物！' : '💧 水井啟動，現有作物保持濕潤狀態！');
+        }
+      }
+
       setShowBuildingShop(false);
       addNotification(`建造了 ${BUILDINGS[buildingType].emoji} ${BUILDINGS[buildingType].name}！`);
     } else if (buildings[buildingType]) {
