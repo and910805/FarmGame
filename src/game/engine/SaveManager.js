@@ -1,5 +1,5 @@
 import { ANIMALS, CROPS, ANIMAL_PRODUCTS } from '../data/GameCatalog';
-import { BASE_ANIMAL_CAPACITY, MAX_ANIMAL_CAPACITY, BASE_FARM_PLOTS, MAX_FARM_PLOTS } from './GameEngine';
+import { BASE_ANIMAL_CAPACITY, MAX_ANIMAL_CAPACITY, BASE_FARM_PLOTS, MAX_FARM_PLOTS, BUILDING_UPGRADES } from './GameEngine';
 
 const createDefaultInventory = () => {
   const inventory = {};
@@ -213,9 +213,29 @@ export class SaveManager {
 
     let normalizedBuildings = { ...(gameState.buildings || {}) };
     if (normalizedBuildings.well) {
-      normalizedBuildings.sprinkler = true;
+      normalizedBuildings.sprinkler = Math.max(normalizedBuildings.sprinkler || 0, 1);
       delete normalizedBuildings.well;
     }
+
+    Object.entries(BUILDING_UPGRADES).forEach(([key, upgrades]) => {
+      if (!Array.isArray(upgrades) || upgrades.length === 0) {
+        return;
+      }
+
+      const raw = normalizedBuildings[key];
+      if (raw === undefined || raw === null || raw === false) {
+        delete normalizedBuildings[key];
+        return;
+      }
+
+      const maxLevel = upgrades[upgrades.length - 1].level;
+      if (typeof raw === 'number') {
+        const level = Math.max(1, Math.floor(raw));
+        normalizedBuildings[key] = Math.min(level, maxLevel);
+      } else if (raw === true) {
+        normalizedBuildings[key] = upgrades[0].level;
+      }
+    });
 
     const rawGreenhouse = normalizedBuildings.greenhouse;
     let desiredGreenhouseCount = 0;

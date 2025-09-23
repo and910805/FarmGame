@@ -142,6 +142,51 @@ class GameCatalog {
         weatherBonus: { sunny: 1.2, rainy: 0.8, snow: 0.4 },
         seasonBonus: { spring: 1.35, summer: 1.1, autumn: 0.75, winter: 0.4 },
       }),
+      blueberry: new Crop('blueberry', {
+        name: '藍莓',
+        price: 28,
+        growTime: 9,
+        sellPrice: 70,
+        emoji: '🫐',
+        weatherBonus: { sunny: 1.1, rainy: 1.2, snow: 0.5 },
+        seasonBonus: { spring: 1.2, summer: 1.35, autumn: 0.8, winter: 0.45 },
+      }),
+      pumpkin: new Crop('pumpkin', {
+        name: '南瓜',
+        price: 32,
+        growTime: 12,
+        sellPrice: 95,
+        emoji: '🎃',
+        weatherBonus: { sunny: 1.25, rainy: 0.95, snow: 0.4 },
+        seasonBonus: { spring: 0.85, summer: 1.05, autumn: 1.4, winter: 0.4 },
+      }),
+      soybean: new Crop('soybean', {
+        name: '黃豆',
+        price: 18,
+        growTime: 7,
+        sellPrice: 45,
+        emoji: '🫘',
+        weatherBonus: { sunny: 1.15, rainy: 1.25, snow: 0.7 },
+        seasonBonus: { spring: 1.05, summer: 1.25, autumn: 1.1, winter: 0.65 },
+      }),
+      rice: new Crop('rice', {
+        name: '水稻',
+        price: 22,
+        growTime: 11,
+        sellPrice: 65,
+        emoji: '🍚',
+        weatherBonus: { sunny: 0.9, rainy: 1.4, snow: 0.5 },
+        seasonBonus: { spring: 1.0, summer: 1.35, autumn: 1.1, winter: 0.5 },
+      }),
+      tea: new Crop('tea', {
+        name: '茶葉',
+        price: 30,
+        growTime: 13,
+        sellPrice: 105,
+        emoji: '🍃',
+        weatherBonus: { sunny: 1.3, rainy: 1.0, snow: 0.6 },
+        seasonBonus: { spring: 1.4, summer: 1.1, autumn: 0.95, winter: 0.55 },
+      }),
     };
 
     this.animals = {
@@ -179,23 +224,43 @@ class GameCatalog {
         shelter: 'pigPen',
         butcher: { product: 'pork', amount: 1 },
       }),
-      sheep: new Animal('sheep', { name: '羊', price: 250, happiness: 40, emoji: '🐑', foodCost: 6, income: 18, shelter: 'barn' }),
-      duck: new Animal('duck', { name: '鴨子', price: 120, happiness: 55, emoji: '🦆', foodCost: 3, income: 14, shelter: 'pond' }),
+      sheep: new Animal('sheep', {
+        name: '羊',
+        price: 250,
+        happiness: 40,
+        emoji: '🐑',
+        foodCost: 6,
+        income: 18,
+        shelter: 'barn',
+        product: 'wool',
+        butcher: { product: 'mutton', amount: 1 },
+      }),
+      duck: new Animal('duck', {
+        name: '鴨子',
+        price: 120,
+        happiness: 55,
+        emoji: '🦆',
+        foodCost: 3,
+        income: 14,
+        shelter: 'pond',
+        product: 'duckEgg',
+        butcher: { product: 'duckMeat', amount: 1 },
+      }),
       rabbit: new Animal('rabbit', { name: '兔子', price: 80, happiness: 70, emoji: '🐰', foodCost: 2, income: 8, shelter: 'rabbitHutch' }),
     };
 
     this.buildings = {
-      barn: new Building('barn', { name: '穀倉', price: 1000, emoji: '🏚️', description: '容納牛羊，提升產量', boost: 1.2 }),
-      chickenCoop: new Building('chickenCoop', { name: '雞舍', price: 500, emoji: '🏠', description: '專門養雞，提升產蛋率', boost: 1.3 }),
+      barn: new Building('barn', { name: '穀倉', price: 1000, emoji: '🏚️', description: '容納牛羊，提升產量（可升級）', boost: 1.2 }),
+      chickenCoop: new Building('chickenCoop', { name: '雞舍', price: 500, emoji: '🏠', description: '專門養雞，提升產蛋率（可升級）', boost: 1.3 }),
       dogHouse: new Building('dogHouse', { name: '狗屋', price: 300, emoji: '🏘️', description: '狗狗的溫馨小窩', boost: 1.1 }),
       catHouse: new Building('catHouse', { name: '貓屋', price: 250, emoji: '🏡', description: '貓咪的舒適居所', boost: 1.1 }),
-      pigPen: new Building('pigPen', { name: '豬圈', price: 400, emoji: '🏗️', description: '豬豬的泥土樂園', boost: 1.2 }),
-      pond: new Building('pond', { name: '池塘', price: 600, emoji: '🌊', description: '水鳥的天堂', boost: 1.3 }),
+      pigPen: new Building('pigPen', { name: '豬圈', price: 400, emoji: '🏗️', description: '豬豬的泥土樂園（可升級）', boost: 1.2 }),
+      pond: new Building('pond', { name: '池塘', price: 600, emoji: '🌊', description: '水鳥的天堂（可升級）', boost: 1.3 }),
       rabbitHutch: new Building('rabbitHutch', { name: '兔籠', price: 200, emoji: '📦', description: '兔子的安全小屋', boost: 1.2 }),
       greenhouse: new Building('greenhouse', { name: '溫室', price: 2000, emoji: '🏢', description: '不受天氣影響的種植空間', boost: 1.5 }),
-      silo: new Building('silo', { name: '筒倉', price: 800, emoji: '🗼', description: '儲存更多作物', boost: 1.0 }),
+      silo: new Building('silo', { name: '筒倉', price: 800, emoji: '🗼', description: '提升作物保存品質（可升級）', boost: 1.0 }),
       windmill: new Building('windmill', { name: '風車', price: 1500, emoji: '🌪️', description: '產生額外收入', boost: 1.0 }),
-      sprinkler: new Building('sprinkler', { name: '自動灑水器', price: 650, emoji: '🚿', description: '每天早晨自動澆灌所有作物並減少澆水體力消耗', boost: 1.0 }),
+      sprinkler: new Building('sprinkler', { name: '自動灑水器', price: 650, emoji: '🚿', description: '每天早晨自動灌溉部分農地，升級可覆蓋整個農場', boost: 1.0 }),
     };
 
     this.supplies = {
@@ -229,9 +294,13 @@ class GameCatalog {
     this.animalProducts = {
       egg: { key: 'egg', name: '雞蛋', emoji: '🥚', basePrice: 14, animal: 'chicken' },
       milk: { key: 'milk', name: '鮮奶', emoji: '🥛', basePrice: 35, animal: 'cow' },
+      duckEgg: { key: 'duckEgg', name: '鴨蛋', emoji: '🥚', basePrice: 18, animal: 'duck' },
+      wool: { key: 'wool', name: '羊毛', emoji: '🧶', basePrice: 48, animal: 'sheep' },
       chickenMeat: { key: 'chickenMeat', name: '雞肉', emoji: '🍗', basePrice: 95, animal: 'chicken' },
       beef: { key: 'beef', name: '牛肉', emoji: '🥩', basePrice: 220, animal: 'cow' },
       pork: { key: 'pork', name: '豬肉', emoji: '🍖', basePrice: 160, animal: 'pig' },
+      duckMeat: { key: 'duckMeat', name: '鴨肉', emoji: '🦆', basePrice: 130, animal: 'duck' },
+      mutton: { key: 'mutton', name: '羊肉', emoji: '🍖', basePrice: 150, animal: 'sheep' },
     };
 
     this.achievements = [

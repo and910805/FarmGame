@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { Sprout, Coins, ShoppingCart, Heart, Home, Sun, Moon, Zap, Droplets, Hammer, Building, Star, Save, Trophy, Settings, MessageCircle, Target, UtensilsCrossed, TrendingUp, TrendingDown, Clock3, Boxes } from 'lucide-react';
 import { CROPS, ANIMALS, BUILDINGS, TOOLS, ACHIEVEMENTS, NPCS, WEATHER_TYPES, SEASONS, FARM_SUPPLIES, ANIMAL_PRODUCTS } from './game/data/GameCatalog';
 import { GameFormatter } from './game/utils/GameFormatter';
-import { GameEngine, getFarmExpansionCost, getAnimalHousingExpansionCost, BASE_FARM_PLOTS, MAX_FARM_PLOTS, BASE_ANIMAL_CAPACITY, MAX_ANIMAL_CAPACITY, FARM_EXPANSION_BATCH, ANIMAL_CAPACITY_STEP } from './game/engine/GameEngine';
+import { GameEngine, getFarmExpansionCost, getAnimalHousingExpansionCost, BASE_FARM_PLOTS, MAX_FARM_PLOTS, BASE_ANIMAL_CAPACITY, MAX_ANIMAL_CAPACITY, FARM_EXPANSION_BATCH, ANIMAL_CAPACITY_STEP, BUILDING_UPGRADES } from './game/engine/GameEngine';
 import { SaveManager } from './game/engine/SaveManager';
 import { NotificationCenter } from './game/engine/NotificationCenter';
 
@@ -358,6 +358,19 @@ const FarmGame = () => {
     },
     notifier: addNotification,
   }), [stateRef, addNotification, recordQuestEvent]);
+
+  const sprinklerLevel = useMemo(
+    () => gameEngine.getBuildingLevel(buildings, 'sprinkler'),
+    [gameEngine, buildings],
+  );
+  const sprinklerCoverage = useMemo(
+    () => gameEngine.getSprinklerCoverage(buildings),
+    [gameEngine, buildings],
+  );
+  const nextSprinklerUpgrade = useMemo(() => {
+    const upgrades = BUILDING_UPGRADES.sprinkler || [];
+    return upgrades.find(entry => entry.level === sprinklerLevel + 1) || null;
+  }, [sprinklerLevel]);
 
   const acceptQuest = useCallback((questId) => {
     const quest = questDefinitions[questId];
@@ -814,8 +827,7 @@ const FarmGame = () => {
             prevAnimals.forEach(animal => {
               const animalData = ANIMALS[animal.type];
               const shelterKey = animalData.shelter;
-              const hasShelter = buildings?.[shelterKey];
-              const boost = hasShelter ? BUILDINGS[shelterKey].boost : 1;
+              const boost = gameEngine.getShelterBoost(buildings, shelterKey);
 
               const previousHunger = animal.hunger ?? 60;
               const hunger = Math.max(0, previousHunger - 30);
@@ -986,9 +998,12 @@ const FarmGame = () => {
           const stormDamaged = [];
           const blightInfected = [];
           const autoWatered = new Set();
+          const uncoveredByCoverage = new Set();
+          const sprinklerLevel = gameEngine.getBuildingLevel(buildings, 'sprinkler');
+          const sprinklerCoverage = gameEngine.getSprinklerCoverage(buildings);
+          let autoWaterCapacityUsed = 0;
           setFarm(prevFarm => {
             let changed = false;
-            const hasSprinkler = buildings?.sprinkler;
             const nextFarm = prevFarm.map(plot => {
               let updatedPlot = plot;
 
@@ -1029,11 +1044,17 @@ const FarmGame = () => {
                   updatedPlot = { ...updatedPlot, pestDays: 0 };
                 }
 
-                if (hasSprinkler && updatedPlot.crop && !updatedPlot.ready && !updatedPlot.watered) {
-                  const cropInfo = CROPS[updatedPlot.crop];
-                  updatedPlot = { ...updatedPlot, watered: true };
-                  if (cropInfo) {
-                    autoWatered.add(cropInfo.name);
+                const cropInfo = updatedPlot.crop ? CROPS[updatedPlot.crop] : null;
+
+                if (sprinklerLevel > 0 && sprinklerCoverage > 0 && updatedPlot.crop && !updatedPlot.ready && !updatedPlot.watered) {
+                  if (autoWaterCapacityUsed < sprinklerCoverage) {
+                    autoWaterCapacityUsed += 1;
+                    updatedPlot = { ...updatedPlot, watered: true };
+                    if (cropInfo) {
+                      autoWatered.add(cropInfo.name);
+                    }
+                  } else if (cropInfo) {
+                    uncoveredByCoverage.add(cropInfo.name);
                   }
                 }
               } else {
@@ -1144,6 +1165,11 @@ const FarmGame = () => {
             addNotification(`🚿 自動灑水器已為 ${names} 補足水分。`, { type: 'info' });
           }
 
+          if (uncoveredByCoverage.size > 0) {
+            const names = Array.from(uncoveredByCoverage).join('、');
+            addNotification(`🚿 ${names} 超出了現有自動灑水範圍，請考慮升級灌溉設備。`, { type: 'warning' });
+          }
+
           return 6;
         }
         return newTime;
@@ -1151,7 +1177,7 @@ const FarmGame = () => {
     }, 15000);
 
     return () => clearInterval(timer);
-  }, [season, buildings, animals, addNotification]);
+  }, [season, buildings, animals, addNotification, gameEngine]);
 
   // 天氣系統
   useEffect(() => {
@@ -1496,10 +1522,17 @@ const FarmGame = () => {
                 );
               })}
             </div>
-            {buildings?.sprinkler && (
+            {sprinklerLevel > 0 && (
               <div className="mb-4 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-700 flex items-center gap-2">
                 <Droplets className="w-3 h-3" />
-                自動灑水器會在每日清晨為尚未成熟的作物補水，並降低人工澆水所需體力。
+                <span>
+                  自動灑水器 Lv{sprinklerLevel} 覆蓋 {Math.min(sprinklerCoverage, farmSize)}/{farmSize} 格農地，
+                  {sprinklerCoverage < farmSize
+                    ? nextSprinklerUpgrade
+                      ? `升級可擴充至 ${nextSprinklerUpgrade.coverage} 格。`
+                      : '已達覆蓋上限，記得安排人工澆水。'
+                    : '所有作物都會在清晨自動補水。'}
+                </span>
               </div>
             )}
 
@@ -1530,7 +1563,11 @@ const FarmGame = () => {
                       <span className="text-2xl">{entry.meta.emoji}</span>
                       <span className="text-sm font-semibold">
                         {entry.meta.name}
-                        {entry.key === 'greenhouse' && entry.count ? ` x${entry.count}` : ''}
+                        {entry.key === 'greenhouse'
+                          ? entry.count ? ` x${entry.count}` : ''
+                          : typeof entry.value === 'number'
+                            ? ` Lv${entry.value}`
+                            : ''}
                       </span>
                     </div>
                   ))}
@@ -1557,7 +1594,8 @@ const FarmGame = () => {
                 <div className="grid grid-cols-4 gap-4">
                   {animals.map((animal) => {
                     const animalData = ANIMALS[animal.type];
-                    const hasBuilding = buildings[animalData.shelter];
+                    const shelterLevel = gameEngine.getBuildingLevel(buildings, animalData.shelter);
+                    const hasBuilding = shelterLevel > 0;
                     const hunger = animal.hunger ?? 50;
                     const isHungry = hunger <= 30;
                     const isSick = Boolean(animal.sick);
@@ -1574,6 +1612,9 @@ const FarmGame = () => {
                         {hasBuilding && (
                           <div className="absolute top-1 right-1 text-xs">
                             {BUILDINGS[animalData.shelter].emoji}
+                            {shelterLevel > 1 && (
+                              <span className="ml-1 text-[10px] font-semibold text-green-700">Lv{shelterLevel}</span>
+                            )}
                           </div>
                         )}
                         {isSick && (
@@ -2338,61 +2379,98 @@ const FarmGame = () => {
       {showBuildingShop && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg p-6 max-w-3xl w-full mx-4 max-h-96 overflow-y-auto">
-            <h2 className="text-xl font-bold mb-4">建築商店</h2>
-            <div className="grid grid-cols-2 gap-4">
-              {Object.entries(BUILDINGS).map(([key, building]) => {
-                const rawValue = buildings?.[key];
-                const isGreenhouse = key === 'greenhouse';
-                const greenhouseCount = isGreenhouse
-                  ? (typeof rawValue === 'number'
-                    ? rawValue
-                    : (rawValue && Array.isArray(farm) ? farm.filter(plot => plot.greenhouse).length : 0))
-                  : 0;
-                const isOwned = isGreenhouse ? greenhouseCount > 0 : Boolean(rawValue);
-                const canPurchase = isGreenhouse || !isOwned;
-                const cardHighlight = isGreenhouse && greenhouseCount > 0
-                  ? 'bg-teal-50 border-teal-300'
-                  : isOwned
-                    ? 'bg-green-100 border-green-400'
-                    : 'hover:bg-gray-50';
+              <h2 className="text-xl font-bold mb-4">建築商店</h2>
+              <div className="grid grid-cols-2 gap-4">
+                {Object.entries(BUILDINGS).map(([key, building]) => {
+                  const rawValue = buildings?.[key];
+                  const isGreenhouse = key === 'greenhouse';
+                  const greenhouseCount = isGreenhouse
+                    ? (typeof rawValue === 'number'
+                      ? rawValue
+                      : (rawValue && Array.isArray(farm) ? farm.filter(plot => plot.greenhouse).length : 0))
+                    : 0;
+                  const currentLevel = isGreenhouse ? greenhouseCount : gameEngine.getBuildingLevel(buildings, key);
+                  const upgrades = BUILDING_UPGRADES[key] || [];
+                  const hasLevels = upgrades.length > 0;
+                  const nextUpgrade = hasLevels
+                    ? upgrades.find(entry => entry.level === currentLevel + 1)
+                    : null;
+                  const currentInfo = hasLevels
+                    ? upgrades.find(entry => entry.level === (currentLevel > 0 ? currentLevel : upgrades[0].level))
+                    : null;
+                  const isOwned = isGreenhouse ? greenhouseCount > 0 : currentLevel > 0;
+                  const canPurchase = isGreenhouse
+                    ? true
+                    : hasLevels
+                      ? Boolean(nextUpgrade)
+                      : !isOwned;
+                  const cardHighlight = isGreenhouse && greenhouseCount > 0
+                    ? 'bg-teal-50 border-teal-300'
+                    : isOwned
+                      ? (hasLevels && !nextUpgrade ? 'bg-amber-50 border-amber-300' : 'bg-green-100 border-green-400')
+                      : 'hover:bg-gray-50';
+                  const priceLabel = isGreenhouse
+                    ? `$${building.price}`
+                    : hasLevels
+                      ? nextUpgrade
+                        ? `$${nextUpgrade.cost}`
+                        : '已滿級'
+                      : isOwned
+                        ? '已擁有'
+                        : `$${building.price}`;
+                  const actionLabel = isGreenhouse
+                    ? (greenhouseCount > 0 ? '再購一格' : '建造')
+                    : hasLevels
+                      ? nextUpgrade
+                        ? (currentLevel > 0 ? `升級至 Lv${nextUpgrade.level}` : '建造')
+                        : `Lv${currentLevel}`
+                      : (isOwned ? '已建造' : '建造');
 
-                return (
-                  <div key={key}
-                       className={`border rounded-lg p-4 transition-colors ${cardHighlight} ${canPurchase ? 'cursor-pointer' : 'cursor-not-allowed opacity-80'}`}
-                       onClick={() => canPurchase && buyBuilding(key)}>
-                    <div className="text-center">
-                      <div className="text-3xl mb-2">{building.emoji}</div>
-                      <div className="font-semibold">{building.name}</div>
-                      <div className={`font-bold ${isOwned && !isGreenhouse ? 'text-green-600' : 'text-green-600'}`}>
-                        {isGreenhouse
-                          ? `$${building.price}`
-                          : isOwned
-                            ? '已擁有'
-                            : `$${building.price}`}
-                      </div>
-                      <div className="text-xs text-gray-600 mt-2 space-y-1">
-                        <p>{building.description}</p>
-                        {isGreenhouse && (
-                          <p className="text-teal-600">
-                            {greenhouseCount > 0
-                              ? `目前共有 ${greenhouseCount} 格溫室土地，可再購買擴充。`
-                              : '每次購買可讓一格農地升級為溫室。'}
-                          </p>
+                  return (
+                    <div key={key}
+                         className={`border rounded-lg p-4 transition-colors ${cardHighlight} ${canPurchase ? 'cursor-pointer' : 'cursor-not-allowed opacity-80'}`}
+                         onClick={() => canPurchase && buyBuilding(key)}>
+                      <div className="text-center space-y-2">
+                        <div className="text-3xl mb-2">{building.emoji}</div>
+                        <div className="font-semibold">
+                          {building.name}
+                          {hasLevels && currentLevel > 0 && key !== 'greenhouse' && (
+                            <span className="ml-1 text-sm text-green-600">Lv{currentLevel}</span>
+                          )}
+                        </div>
+                        <div className={`font-bold ${canPurchase ? 'text-green-600' : 'text-gray-500'}`}>{priceLabel}</div>
+                        <div className="text-xs text-gray-500">{actionLabel}</div>
+                        <div className="text-xs text-gray-600 mt-2 space-y-1">
+                          <p>{building.description}</p>
+                          {isGreenhouse && (
+                            <p className="text-teal-600">
+                              {greenhouseCount > 0
+                                ? `目前共有 ${greenhouseCount} 格溫室土地，可再購買擴充。`
+                                : '每次購買可讓一格農地升級為溫室。'}
+                            </p>
+                          )}
+                          {hasLevels && currentInfo && (
+                            <p className={currentLevel > 0 ? 'text-green-600' : 'text-blue-600'}>
+                              {currentLevel > 0 ? `目前 Lv${currentLevel}：` : '等級預覽：'}{currentInfo.description}
+                            </p>
+                          )}
+                          {hasLevels && nextUpgrade && (
+                            <p className="text-blue-600">下一級：{nextUpgrade.description}</p>
+                          )}
+                        </div>
+                        {!hasLevels && building.boost !== 1.0 && (
+                          <div className="text-xs text-blue-600">
+                            效果加成: {Math.round(building.boost * 100)}%
+                          </div>
                         )}
                       </div>
-                      {building.boost !== 1.0 && (
-                        <div className="text-xs text-blue-600">
-                          效果加成: {Math.round(building.boost * 100)}%
-                        </div>
-                      )}
                     </div>
-                  </div>
-                );
-              })}
-            </div>
-            <button onClick={() => setShowBuildingShop(false)}
-                    className="mt-4 w-full bg-gray-500 hover:bg-gray-600 text-white py-2 px-4 rounded transition-colors">
-              關閉
+                  );
+                })}
+              </div>
+              <button onClick={() => setShowBuildingShop(false)}
+                      className="mt-4 w-full bg-gray-500 hover:bg-gray-600 text-white py-2 px-4 rounded transition-colors">
+                關閉
             </button>
           </div>
         </div>

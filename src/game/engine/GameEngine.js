@@ -1,7 +1,7 @@
 import { CROPS, ANIMALS, BUILDINGS, TOOLS, FARM_SUPPLIES, ANIMAL_PRODUCTS } from '../data/GameCatalog';
 
 export const BASE_FARM_PLOTS = 25;
-export const FARM_EXPANSION_BATCH = 5;
+export const FARM_EXPANSION_BATCH = 1;
 export const MAX_FARM_PLOTS = 45;
 export const BASE_ANIMAL_CAPACITY = 6;
 export const ANIMAL_CAPACITY_STEP = 1;
@@ -11,7 +11,8 @@ export const getFarmExpansionCost = (currentPlotCount) => {
   if (currentPlotCount >= MAX_FARM_PLOTS) {
     return null;
   }
-  return 5000;
+  const expansionsPurchased = Math.max(0, currentPlotCount - BASE_FARM_PLOTS);
+  return 1000 + (expansionsPurchased * 250);
 };
 
 export const getAnimalHousingExpansionCost = (currentCapacity) => {
@@ -19,6 +20,38 @@ export const getAnimalHousingExpansionCost = (currentCapacity) => {
     return null;
   }
   return 2500;
+};
+
+export const BUILDING_UPGRADES = {
+  sprinkler: [
+    { level: 1, cost: 650, coverage: 12, manualWaterCost: 3, plantingDiscount: 3, description: '覆蓋 12 格農地，自動補水並減少播種體力。' },
+    { level: 2, cost: 900, coverage: 24, manualWaterCost: 2, plantingDiscount: 4, description: '覆蓋範圍擴大至 24 格，澆水幾乎不費力。' },
+    { level: 3, cost: 1400, coverage: 36, manualWaterCost: 1, plantingDiscount: 5, description: '灌溉到 36 格農地並極大幅度節省體力。' },
+    { level: 4, cost: 2200, coverage: MAX_FARM_PLOTS, manualWaterCost: 1, plantingDiscount: 6, description: '全區自動灌溉，維持土壤最佳濕度。' },
+  ],
+  silo: [
+    { level: 1, cost: 800, sellBonus: 0.05, description: '作物售價 +5%，減少腐壞。' },
+    { level: 2, cost: 1200, sellBonus: 0.1, description: '作物售價 +10%，可長期保存。' },
+    { level: 3, cost: 1800, sellBonus: 0.18, description: '作物售價 +18%，高效率倉儲。' },
+  ],
+  barn: [
+    { level: 1, cost: 1000, boost: 1.2, description: '提供牛羊穩定環境，提升產量。' },
+    { level: 2, cost: 1500, boost: 1.35, description: '擴增飼槽與溫控，提高品質。' },
+    { level: 3, cost: 2200, boost: 1.5, description: '頂級穀倉，讓牛羊更快樂。' },
+  ],
+  chickenCoop: [
+    { level: 1, cost: 500, boost: 1.3, description: '舒適雞舍，提升產蛋率。' },
+    { level: 2, cost: 850, boost: 1.45, description: '自動餵食設備維持穩定產量。' },
+    { level: 3, cost: 1200, boost: 1.6, description: '氣候調節雞舍，全年高產。' },
+  ],
+  pigPen: [
+    { level: 1, cost: 400, boost: 1.2, description: '泥土樂園讓豬豬更放鬆。' },
+    { level: 2, cost: 700, boost: 1.35, description: '增設噴霧與運動空間，提升肉質。' },
+  ],
+  pond: [
+    { level: 1, cost: 600, boost: 1.3, description: '自然池塘讓水鳥安心棲息。' },
+    { level: 2, cost: 950, boost: 1.45, description: '擴建浮台與遮蔭範圍。' },
+  ],
 };
 
 export class GameEngine {
@@ -74,6 +107,108 @@ export class GameEngine {
     }
 
     return 0;
+  }
+
+  getBuildingLevel(buildings = this.state.buildings, key) {
+    if (!buildings) {
+      return 0;
+    }
+
+    const value = buildings[key];
+    if (typeof value === 'number') {
+      return Math.max(0, Math.floor(value));
+    }
+
+    return value ? 1 : 0;
+  }
+
+  getBuildingUpgradeInfo(key, level) {
+    const upgrades = BUILDING_UPGRADES[key];
+    if (!upgrades) {
+      return null;
+    }
+
+    return upgrades.find(entry => entry.level === level) || null;
+  }
+
+  getNextBuildingUpgrade(key, currentLevel) {
+    const upgrades = BUILDING_UPGRADES[key];
+    if (!upgrades) {
+      return null;
+    }
+
+    return upgrades.find(entry => entry.level === currentLevel + 1) || null;
+  }
+
+  getSprinklerLevel(buildings = this.state.buildings) {
+    return this.getBuildingLevel(buildings, 'sprinkler');
+  }
+
+  getSprinklerCoverage(buildings = this.state.buildings) {
+    const level = this.getSprinklerLevel(buildings);
+    if (level <= 0) {
+      return 0;
+    }
+
+    const info = this.getBuildingUpgradeInfo('sprinkler', level);
+    return info?.coverage ?? 0;
+  }
+
+  getSprinklerManualWaterCost() {
+    const level = this.getSprinklerLevel();
+    if (level <= 0) {
+      return 5;
+    }
+
+    const info = this.getBuildingUpgradeInfo('sprinkler', level);
+    if (info && typeof info.manualWaterCost === 'number') {
+      return Math.max(1, info.manualWaterCost);
+    }
+
+    return 2;
+  }
+
+  getSprinklerPlantingDiscount() {
+    const level = this.getSprinklerLevel();
+    if (level <= 0) {
+      return 0;
+    }
+
+    const info = this.getBuildingUpgradeInfo('sprinkler', level);
+    if (info && typeof info.plantingDiscount === 'number') {
+      return Math.max(0, info.plantingDiscount);
+    }
+
+    return 3;
+  }
+
+  getSiloBonus(buildings = this.state.buildings) {
+    const level = this.getBuildingLevel(buildings, 'silo');
+    if (level <= 0) {
+      return 0;
+    }
+
+    const info = this.getBuildingUpgradeInfo('silo', level);
+    return info?.sellBonus ?? 0;
+  }
+
+  getShelterBoost(buildings = this.state.buildings, shelterKey) {
+    if (!shelterKey) {
+      return 1;
+    }
+
+    const level = this.getBuildingLevel(buildings, shelterKey);
+    if (level <= 0) {
+      return 1;
+    }
+
+    const info = this.getBuildingUpgradeInfo(shelterKey, level);
+    if (info && typeof info.boost === 'number') {
+      return info.boost;
+    }
+
+    const building = BUILDINGS[shelterKey];
+    return building?.boost ?? 1;
   }
 
   getSeedKey(seedType) {
@@ -175,6 +310,10 @@ export class GameEngine {
     }
 
     const plotsToAdd = Math.min(FARM_EXPANSION_BATCH, MAX_FARM_PLOTS - farm.length);
+    let resultingSize = farm.length;
+    const sprinklerLevel = this.getSprinklerLevel();
+    const coverage = this.getSprinklerCoverage();
+    const wasCovered = farm.length <= coverage;
     this.setters.setMoney(prev => prev - price);
     this.setters.setFarm(prev => {
       const safePrev = Array.isArray(prev) ? prev : [];
@@ -195,10 +334,15 @@ export class GameEngine {
         });
       }
 
+      resultingSize = next.length;
       return next;
     });
 
     this.notify(`農地擴建完成，新增 ${plotsToAdd} 格土地！`, { type: 'success' });
+
+    if (sprinklerLevel > 0 && coverage > 0 && wasCovered && resultingSize > coverage) {
+      this.notify(`🚿 自動灑水器目前僅能覆蓋 ${coverage} 格，記得升級避免作物缺水。`, { type: 'warning' });
+    }
   }
 
   expandAnimalHousing() {
@@ -318,7 +462,7 @@ export class GameEngine {
   }
 
   plantSeed(plotId) {
-    const { selectedSeed, tools, buildings, energy, money, marketPrices, inventory, season, farm } = this.state;
+    const { selectedSeed, tools, energy, money, marketPrices, inventory, season, farm } = this.state;
     if (!selectedSeed) return;
 
     const price = (marketPrices && marketPrices[selectedSeed]) || CROPS[selectedSeed].price;
@@ -333,7 +477,8 @@ export class GameEngine {
       return;
     }
 
-    const energyCost = Math.max(1, 10 - TOOLS[tools].energyReduction - (buildings?.sprinkler ? 5 : 0));
+    const irrigationDiscount = this.getSprinklerPlantingDiscount();
+    const energyCost = Math.max(1, 10 - TOOLS[tools].energyReduction - irrigationDiscount);
     if (energy < energyCost) {
       this.notify('體力不足！', { type: 'warning' });
       return;
@@ -427,8 +572,8 @@ export class GameEngine {
   }
 
   waterPlot(plotId) {
-    const { energy, buildings } = this.state;
-    const energyCost = buildings?.sprinkler ? 1 : 5;
+    const { energy } = this.state;
+    const energyCost = this.getSprinklerManualWaterCost();
     if (energy < energyCost) {
       this.notify('體力不足，無法澆水！', { type: 'warning' });
       return;
@@ -449,7 +594,7 @@ export class GameEngine {
     const animal = ANIMALS[animalType];
     const requiredShelter = animal.shelter;
 
-    if (requiredShelter && !this.state.buildings?.[requiredShelter]) {
+    if (requiredShelter && this.getBuildingLevel(this.state.buildings, requiredShelter) <= 0) {
       const shelterName = BUILDINGS[requiredShelter].name;
       this.notify(`需要先建造 ${shelterName} 才能飼養 ${animal.name}！`, { type: 'warning' });
       return;
@@ -551,7 +696,34 @@ export class GameEngine {
       return;
     }
 
-    if (buildings?.[buildingType]) {
+    const currentLevel = this.getBuildingLevel(buildings, buildingType);
+    const upgradeInfo = this.getNextBuildingUpgrade(buildingType, currentLevel);
+    if (upgradeInfo) {
+      if (money < upgradeInfo.cost) {
+        this.notify('金錢不足，暫時無法升級建築。', { type: 'error' });
+        return;
+      }
+
+      this.setters.setMoney(prev => prev - upgradeInfo.cost);
+      this.setters.setBuildings(prev => ({
+        ...prev,
+        [buildingType]: upgradeInfo.level,
+      }));
+
+      this.setters.setShowBuildingShop(false);
+      const action = currentLevel > 0 ? '升級' : '建造';
+      this.notify(`${action}了 ${building.emoji} ${building.name}（Lv${upgradeInfo.level}）！`, { type: 'success' });
+
+      const detail = buildingType === 'sprinkler'
+        ? `自動灑水範圍提升至 ${upgradeInfo.coverage} 格。`
+        : upgradeInfo.description;
+      if (detail) {
+        this.notify(detail, { type: 'info' });
+      }
+      return;
+    }
+
+    if (currentLevel > 0) {
       this.notify('已經擁有此建築！', { type: 'info' });
       return;
     }
@@ -678,7 +850,9 @@ export class GameEngine {
     if (CROPS[itemKey]) {
       const { marketPrices } = this.state;
       const basePrice = (marketPrices && marketPrices[itemKey]) || CROPS[itemKey].sellPrice;
-      return Math.max(0, Math.floor(basePrice * count));
+      const siloBonus = this.getSiloBonus();
+      const adjustedPrice = basePrice * count * (1 + siloBonus);
+      return Math.max(0, Math.floor(adjustedPrice));
     }
 
     const product = ANIMAL_PRODUCTS[itemKey];
@@ -693,9 +867,7 @@ export class GameEngine {
     if (animalType && ANIMALS[animalType]) {
       const animalData = ANIMALS[animalType];
       const shelterKey = animalData.shelter;
-      if (shelterKey && buildings?.[shelterKey]) {
-        multiplier *= BUILDINGS[shelterKey].boost || 1;
-      }
+      multiplier *= this.getShelterBoost(buildings, shelterKey);
 
       const ownedAnimals = (animals || []).filter(a => a.type === animalType);
       if (ownedAnimals.length > 0) {
