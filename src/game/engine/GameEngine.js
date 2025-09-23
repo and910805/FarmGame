@@ -11,9 +11,9 @@ export class GameEngine {
     return this.stateRef.current;
   }
 
-  notify(message) {
+  notify(message, options) {
     if (this.notifier) {
-      this.notifier(message);
+      this.notifier(message, options);
     }
   }
 
@@ -25,9 +25,9 @@ export class GameEngine {
       this.setters.setMoney(prev => prev - price);
       this.setters.setSelectedSeed(seedType);
       this.setters.setShowShop(false);
-      this.notify(`購買了 ${CROPS[seedType].name} 種子！`);
+      this.notify(`購買了 ${CROPS[seedType].name} 種子！`, { type: 'success' });
     } else {
-      this.notify('金錢不足！');
+      this.notify('金錢不足！', { type: 'error' });
     }
   }
 
@@ -37,7 +37,7 @@ export class GameEngine {
 
     const energyCost = Math.max(1, 10 - TOOLS[tools].energyReduction - (buildings?.well ? 5 : 0));
     if (energy < energyCost) {
-      this.notify('體力不足！');
+      this.notify('體力不足！', { type: 'warning' });
       return;
     }
 
@@ -50,7 +50,7 @@ export class GameEngine {
     this.setters.setEnergy(prev => Math.max(0, prev - energyCost));
     this.setters.setExperience(prev => prev + 5);
     this.setters.setSelectedSeed(null);
-    this.notify(`種植了 ${CROPS[selectedSeed].name}！`);
+    this.notify(`種植了 ${CROPS[selectedSeed].name}！`, { type: 'success' });
   }
 
   harvestCrop(plotId) {
@@ -77,13 +77,16 @@ export class GameEngine {
         : p
     ));
 
-    this.notify(`收成了 ${CROPS[crop].emoji}！獲得 $${sellPrice}`);
+    this.notify(`收成了 ${CROPS[crop].emoji}！獲得 $${sellPrice}`, { type: 'success' });
   }
 
   waterPlot(plotId) {
     const { energy, buildings } = this.state;
     const energyCost = buildings?.well ? 2 : 5;
-    if (energy < energyCost) return;
+    if (energy < energyCost) {
+      this.notify('體力不足，無法澆水！', { type: 'warning' });
+      return;
+    }
 
     this.setters.setFarm(prev => prev.map(plot =>
       plot.id === plotId && plot.crop && !plot.watered
@@ -92,12 +95,19 @@ export class GameEngine {
     ));
 
     this.setters.setEnergy(prev => Math.max(0, prev - energyCost));
-    this.notify('澆水完成！');
+    this.notify('澆水完成！', { type: 'success' });
   }
 
   buyAnimal(animalType) {
     const { money } = this.state;
     const animal = ANIMALS[animalType];
+    const requiredShelter = animal.shelter;
+
+    if (requiredShelter && !this.state.buildings?.[requiredShelter]) {
+      const shelterName = BUILDINGS[requiredShelter].name;
+      this.notify(`需要先建造 ${shelterName} 才能飼養 ${animal.name}！`, { type: 'warning' });
+      return;
+    }
 
     if (money >= animal.price) {
       this.setters.setMoney(prev => prev - animal.price);
@@ -105,12 +115,14 @@ export class GameEngine {
         id: Date.now(),
         type: animalType,
         happiness: animal.happiness,
+        hunger: 70,
+        lastFed: Date.now(),
         name: `${animal.name}${prev.filter(a => a.type === animalType).length + 1}`,
       }]);
       this.setters.setShowAnimalShop(false);
-      this.notify(`購買了 ${animal.emoji} ${animal.name}！`);
+      this.notify(`購買了 ${animal.emoji} ${animal.name}！`, { type: 'success' });
     } else {
-      this.notify('金錢不足！');
+      this.notify('金錢不足！', { type: 'error' });
     }
   }
 
@@ -119,7 +131,7 @@ export class GameEngine {
     const building = BUILDINGS[buildingType];
 
     if (buildings?.[buildingType]) {
-      this.notify('已經擁有此建築！');
+      this.notify('已經擁有此建築！', { type: 'info' });
       return;
     }
 
@@ -134,9 +146,9 @@ export class GameEngine {
       }
 
       this.setters.setShowBuildingShop(false);
-      this.notify(`建造了 ${building.emoji} ${building.name}！`);
+      this.notify(`建造了 ${building.emoji} ${building.name}！`, { type: 'success' });
     } else {
-      this.notify('金錢不足！');
+      this.notify('金錢不足！', { type: 'error' });
     }
   }
 
@@ -150,9 +162,9 @@ export class GameEngine {
       this.setters.setMoney(prev => prev - tool.price);
       this.setters.setTools(toolType);
       this.setters.setShowToolShop(false);
-      this.notify(`升級工具：${tool.name}！`);
+      this.notify(`升級工具：${tool.name}！`, { type: 'success' });
     } else {
-      this.notify('金錢不足！');
+      this.notify('金錢不足！', { type: 'error' });
     }
   }
 
@@ -162,15 +174,29 @@ export class GameEngine {
     if (!animal) return;
 
     const cost = ANIMALS[animal.type].foodCost;
-    if (money < cost) return;
+    if (money < cost) {
+      this.notify('金錢不足，無法購買飼料！', { type: 'error' });
+      return;
+    }
+
+    const currentHunger = animal.hunger ?? 50;
+    if (currentHunger >= 95) {
+      this.notify(`${animal.name} 已經吃得很飽囉！`, { type: 'info' });
+      return;
+    }
 
     this.setters.setMoney(prev => prev - cost);
     this.setters.setAnimals(prev => prev.map(a =>
       a.id === animalId
-        ? { ...a, happiness: Math.min(100, a.happiness + 25) }
+        ? {
+            ...a,
+            happiness: Math.min(100, (a.happiness ?? ANIMALS[a.type].happiness) + 20),
+            hunger: Math.min(100, currentHunger + 40),
+            lastFed: Date.now(),
+          }
         : a
     ));
-    this.notify(`餵食了 ${animal.name}！快樂度 +25`);
+    this.notify(`餵食了 ${animal.name}！`, { type: 'success' });
   }
 }
 

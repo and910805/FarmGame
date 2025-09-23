@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { Sprout, Coins, ShoppingCart, Heart, Home, Sun, Moon, Zap, Droplets, Hammer, Building, Star, Save, Trophy, Settings, MessageCircle, Target } from 'lucide-react';
+import { Sprout, Coins, ShoppingCart, Heart, Home, Sun, Moon, Zap, Droplets, Hammer, Building, Star, Save, Trophy, Settings, MessageCircle, Target, UtensilsCrossed } from 'lucide-react';
 import { CROPS, ANIMALS, BUILDINGS, TOOLS, ACHIEVEMENTS, NPCS, WEATHER_TYPES, SEASONS } from './game/data/GameCatalog';
 import { GameFormatter } from './game/utils/GameFormatter';
 import { GameEngine } from './game/engine/GameEngine';
@@ -55,8 +55,11 @@ const FarmGame = () => {
   const [notifications, setNotifications] = useState([]);
 
   const notificationCenter = useMemo(() => new NotificationCenter(setNotifications), []);
-  const addNotification = useCallback((message) => {
-    notificationCenter.push(message);
+  const addNotification = useCallback((message, options) => {
+    notificationCenter.push(message, options);
+  }, [notificationCenter]);
+  const dismissNotification = useCallback((id) => {
+    notificationCenter.dismiss(id);
   }, [notificationCenter]);
   
   // 新功能狀態
@@ -184,20 +187,26 @@ const FarmGame = () => {
   // AI顧問系統
   useEffect(() => {
     const generateAdvice = () => {
+      const safeAnimals = Array.isArray(animals) ? animals : [];
+      const safeInventory = inventory || {};
+
       const advices = [
         weather === 'sunny' ? '☀️ 晴天適合種植番茄和草莓！' : '',
         weather === 'rainy' ? '🌧️ 雨天作物會自動澆水，適合種植小麥！' : '',
         energy < 30 ? '⚡ 體力不足，建議休息或升級工具！' : '',
         money > 2000 ? '💰 資金充足，考慮建造新建築！' : '',
-        animals.some(a => a.happiness < 30) ? '🐾 有動物不開心，記得餵食！' : '',
-        Object.values(inventory).some(count => count > 10) ? '📦 庫存充足，可以考慮出售！' : ''
-      ].filter(advice => advice);
-      
+        safeAnimals.some(a => (a.happiness ?? 50) < 40) ? '🐾 有動物心情低落，餵食或陪伴牠們吧！' : '',
+        safeAnimals.some(a => (a.hunger ?? 60) < 35) ? '🍽️ 有動物快餓扁了，趕快餵牠們！' : '',
+        Object.values(safeInventory).some(count => count > 10) ? '📦 庫存充足，可以考慮出售！' : '',
+      ].filter(Boolean);
+
       if (advices.length > 0) {
         setAiAdvice(advices[Math.floor(Math.random() * advices.length)]);
+      } else {
+        setAiAdvice('🌱 保持平衡發展，慢慢擴張農場！');
       }
     };
-    
+
     const timer = setInterval(generateAdvice, 60000);
     generateAdvice();
     return () => clearInterval(timer);
@@ -250,7 +259,7 @@ const FarmGame = () => {
         if (unlocked) {
           setCompletedAchievements(prev => new Set([...prev, achievement.id]));
           setMoney(prev => prev + achievement.reward);
-          addNotification(`🏆 達成成就：${achievement.name}！獲得 $${achievement.reward}`);
+          addNotification(`🏆 達成成就：${achievement.name}！獲得 $${achievement.reward}`, { type: 'success' });
         }
       }
     });
@@ -268,29 +277,69 @@ const FarmGame = () => {
               const currentSeasonIndex = SEASONS.indexOf(season);
               const nextSeason = SEASONS[(currentSeasonIndex + 1) % SEASONS.length];
               setSeason(nextSeason);
-              addNotification(`🌸 季節變為 ${GameFormatter.seasonName(nextSeason)}！`);
+              addNotification(`🌸 季節變為 ${GameFormatter.seasonName(nextSeason)}！`, { type: 'info' });
             }
             return newDay;
           });
           
           setEnergy(100);
-          
-          // 動物每日收入
-          setAnimals(prev => prev.map(animal => {
-            const building = buildings[ANIMALS[animal.type].shelter];
-            const boost = building ? BUILDINGS[ANIMALS[animal.type].shelter].boost : 1;
-            const income = Math.floor(ANIMALS[animal.type].income * boost * (animal.happiness / 100));
-            
-            if (animal.happiness > 20) {
-              setMoney(prevMoney => prevMoney + income);
+
+          // 動物每日狀態與收入結算
+          setAnimals(prevAnimals => {
+            if (!Array.isArray(prevAnimals) || prevAnimals.length === 0) {
+              return prevAnimals;
             }
-            
-            return {
-              ...animal,
-              happiness: Math.max(0, animal.happiness - 15)
-            };
-          }));
-          
+
+            let totalIncome = 0;
+            const hungryNames = [];
+
+            const updatedAnimals = prevAnimals.map(animal => {
+              const animalData = ANIMALS[animal.type];
+              const shelterKey = animalData.shelter;
+              const hasShelter = buildings?.[shelterKey];
+              const boost = hasShelter ? BUILDINGS[shelterKey].boost : 1;
+
+              const previousHunger = animal.hunger ?? 60;
+              const hunger = Math.max(0, previousHunger - 30);
+
+              let happiness = Math.max(0, (animal.happiness ?? animalData.happiness) - 10);
+              let canProduce = happiness > 20 && hunger > 30;
+
+              if (hunger <= 10) {
+                hungryNames.push(`${animal.name}（急需餵食）`);
+                happiness = Math.max(0, happiness - 25);
+                canProduce = false;
+              } else if (hunger <= 30) {
+                hungryNames.push(animal.name);
+                happiness = Math.max(0, happiness - 10);
+                canProduce = happiness > 25;
+              }
+
+              const income = canProduce
+                ? Math.floor(animalData.income * boost * (happiness / 100))
+                : 0;
+              totalIncome += income;
+
+              return {
+                ...animal,
+                happiness,
+                hunger,
+              };
+            });
+
+            if (totalIncome > 0) {
+              setMoney(prevMoney => prevMoney + totalIncome);
+              addNotification(`🐾 動物們帶來了 $${totalIncome} 的收入！`, { type: 'success' });
+            }
+
+            if (hungryNames.length > 0) {
+              const names = Array.from(new Set(hungryNames)).join('、');
+              addNotification(`🍽️ ${names} 肚子餓了，記得餵食！`, { type: 'warning' });
+            }
+
+            return updatedAnimals;
+          });
+
           return 6;
         }
         return newTime;
@@ -307,7 +356,7 @@ const FarmGame = () => {
         if (prev <= 0) {
           const newWeather = WEATHER_TYPES[Math.floor(Math.random() * WEATHER_TYPES.length)];
           setWeather(newWeather);
-          addNotification(`天氣變為 ${GameFormatter.weatherName(newWeather)} ${GameFormatter.weatherIcon(newWeather)}`);
+          addNotification(`天氣變為 ${GameFormatter.weatherName(newWeather)} ${GameFormatter.weatherIcon(newWeather)}`, { type: 'info' });
           return Math.floor(Math.random() * 8) + 3;
         }
         return prev - 1;
@@ -331,7 +380,7 @@ const FarmGame = () => {
           const adjustedGrowTime = (cropData.growTime * 60000) / (weatherMultiplier * toolMultiplier);
           
           if (now - plot.plantTime >= adjustedGrowTime && !plot.ready) {
-            addNotification(`${cropData.emoji} ${cropData.name} 成熟了！`);
+            addNotification(`${cropData.emoji} ${cropData.name} 成熟了！`, { type: 'success' });
             return { ...plot, ready: true };
           }
         }
@@ -347,7 +396,7 @@ const FarmGame = () => {
     if (experience >= level * 100) {
       setLevel(prev => prev + 1);
       setExperience(prev => prev - (level * 100));
-      addNotification(`🎉 升級到等級 ${level + 1}！`);
+      addNotification(`🎉 升級到等級 ${level + 1}！`, { type: 'success' });
     }
   }, [experience, level, addNotification]);
 
@@ -403,12 +452,32 @@ const FarmGame = () => {
     }`}>
       {/* 通知系統 */}
       <div className="fixed top-4 right-4 z-50 space-y-2 max-w-xs">
-        {notifications.map(notification => (
-          <div key={notification.id} 
-               className="bg-green-500 text-white px-3 py-2 rounded-lg shadow-lg animate-bounce text-sm">
-            {notification.message}
-          </div>
-        ))}
+        {notifications.map(notification => {
+          const styleByType = {
+            success: 'bg-green-500/95 border-green-300',
+            info: 'bg-blue-500/95 border-blue-300',
+            warning: 'bg-yellow-500/95 border-yellow-300',
+            error: 'bg-red-500/95 border-red-300',
+          };
+          const tone = styleByType[notification.type] || styleByType.info;
+          const textClass = notification.type === 'warning' ? 'text-gray-900' : 'text-white';
+          const closeClass = notification.type === 'warning'
+            ? 'text-gray-500 hover:text-gray-700'
+            : 'text-white/80 hover:text-white';
+          return (
+            <div key={notification.id}
+                 className={`px-4 py-3 rounded-lg shadow-lg border flex items-start justify-between gap-2 text-sm transition-all duration-500 backdrop-blur ${tone} ${textClass}`}>
+              <span className="leading-snug">{notification.message}</span>
+              <button
+                onClick={() => dismissNotification(notification.id)}
+                className={closeClass}
+                aria-label="關閉通知"
+              >
+                ×
+              </button>
+            </div>
+          );
+        })}
       </div>
 
       {/* 頂部狀態欄 */}
@@ -559,34 +628,57 @@ const FarmGame = () => {
                 <h3 className="text-lg font-bold mb-3">我的動物們</h3>
                 <div className="grid grid-cols-4 gap-4">
                   {animals.map((animal) => {
-                    const hasBuilding = buildings[ANIMALS[animal.type].shelter];
+                    const animalData = ANIMALS[animal.type];
+                    const hasBuilding = buildings[animalData.shelter];
+                    const hunger = animal.hunger ?? 50;
+                    const isHungry = hunger <= 30;
                     return (
-                      <div key={animal.id} 
-                           className={`rounded-lg p-3 cursor-pointer transition-colors relative ${
+                      <div key={animal.id}
+                           className={`rounded-lg p-3 transition-colors relative ${
                              hasBuilding ? 'bg-green-100 hover:bg-green-200' : 'bg-blue-100 hover:bg-blue-200'
-                           }`}
-                           onClick={() => feedAnimal(animal.id)}>
+                           }`}>
                         {hasBuilding && (
                           <div className="absolute top-1 right-1 text-xs">
-                            {BUILDINGS[ANIMALS[animal.type].shelter].emoji}
+                            {BUILDINGS[animalData.shelter].emoji}
                           </div>
                         )}
-                        <div className="text-center">
-                          <div className="text-3xl mb-2 animate-bounce">
-                            {ANIMALS[animal.type].emoji}
+                        <div className="text-center space-y-2">
+                          <div className="text-3xl animate-bounce">
+                            {animalData.emoji}
                           </div>
                           <div className="text-sm font-semibold">{animal.name}</div>
-                          <div className="flex items-center justify-center mt-1">
-                            <Heart className="w-3 h-3 text-red-400 mr-1" />
-                            <span className="text-xs">{animal.happiness}/100</span>
+                          <div className="space-y-1 text-xs">
+                            <div className="flex items-center justify-center gap-1">
+                              <Heart className="w-3 h-3 text-red-400" />
+                              <span>{Math.round(animal.happiness ?? animalData.happiness)} / 100</span>
+                            </div>
+                            <div className="bg-gray-200 rounded-full h-1">
+                              <div className="bg-red-400 h-1 rounded-full transition-all duration-300"
+                                   style={{ width: `${Math.max(0, Math.min(100, animal.happiness ?? animalData.happiness))}%` }}></div>
+                            </div>
+                            <div className="flex items-center justify-center gap-1 mt-2">
+                              <UtensilsCrossed className={`w-3 h-3 ${isHungry ? 'text-orange-500' : 'text-amber-400'}`} />
+                              <span>{Math.round(hunger)}%</span>
+                            </div>
+                            <div className="bg-gray-200 rounded-full h-1">
+                              <div className={`h-1 rounded-full transition-all duration-300 ${isHungry ? 'bg-orange-400' : 'bg-yellow-400'}`}
+                                   style={{ width: `${Math.max(0, Math.min(100, hunger))}%` }}></div>
+                            </div>
                           </div>
-                          <div className="bg-gray-200 rounded-full h-1 mt-1">
-                            <div className="bg-red-400 h-1 rounded-full transition-all duration-300"
-                                 style={{width: `${animal.happiness}%`}}></div>
+                          <div className="text-xs text-green-600">
+                            日收入: ${Math.floor(animalData.income * (hasBuilding ? BUILDINGS[animalData.shelter].boost : 1))}
                           </div>
-                          <div className="text-xs text-green-600 mt-1">
-                            日收入: ${Math.floor(ANIMALS[animal.type].income * (hasBuilding ? BUILDINGS[ANIMALS[animal.type].shelter].boost : 1))}
-                          </div>
+                          <button
+                            onClick={() => feedAnimal(animal.id)}
+                            className={`w-full text-xs font-semibold py-1 rounded transition-colors ${
+                              isHungry ? 'bg-orange-500 hover:bg-orange-600 text-white' : 'bg-yellow-300 hover:bg-yellow-400 text-amber-800'
+                            }`}
+                          >
+                            餵食 (-${animalData.foodCost})
+                          </button>
+                          {isHungry && (
+                            <div className="text-xs text-orange-600">肚子餓扁了，快餵我！</div>
+                          )}
                         </div>
                       </div>
                     );
@@ -1164,7 +1256,7 @@ const FarmGame = () => {
             <div className="flex space-x-2 mt-4">
               <button onClick={() => {
                 navigator.clipboard?.writeText(saveData);
-                addNotification('存檔數據已複製到剪貼板！');
+                addNotification('存檔數據已複製到剪貼板！', { type: 'info' });
               }}
                       className="flex-1 bg-blue-500 hover:bg-blue-600 text-white py-2 px-4 rounded transition-colors">
                 📋 複製到剪貼板
