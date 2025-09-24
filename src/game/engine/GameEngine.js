@@ -391,6 +391,7 @@ export class GameEngine {
       }
 
       resultingSize = next.length;
+      this.stateRef.current.farm = next;
       return next;
     });
 
@@ -487,11 +488,16 @@ export class GameEngine {
         return true;
       }
 
-      this.setters.setFarm(prev => prev.map(p => (
-        p.id === plotId
-          ? { ...p, fertilized: true }
-          : p
-      )));
+      this.setters.setFarm(prev => {
+        const safePrev = Array.isArray(prev) ? prev : [];
+        const nextFarm = safePrev.map(p => (
+          p.id === plotId
+            ? { ...p, fertilized: true }
+            : p
+        ));
+        this.stateRef.current.farm = nextFarm;
+        return nextFarm;
+      });
       this.consumeSupply('fertilizer', { keepSelection: available > 1 });
       this.notify('施用了有機肥料，作物成長速度提升！', { type: 'success' });
       return true;
@@ -503,11 +509,16 @@ export class GameEngine {
         return true;
       }
 
-      this.setters.setFarm(prev => prev.map(p => (
-        p.id === plotId
-          ? { ...p, pest: false, pestDays: 0 }
-          : p
-      )));
+      this.setters.setFarm(prev => {
+        const safePrev = Array.isArray(prev) ? prev : [];
+        const nextFarm = safePrev.map(p => (
+          p.id === plotId
+            ? { ...p, pest: false, pestDays: 0 }
+            : p
+        ));
+        this.stateRef.current.farm = nextFarm;
+        return nextFarm;
+      });
       this.consumeSupply('pesticide', { keepSelection: available > 1 });
       this.notify('成功清除害蟲，作物恢復生長！', { type: 'success' });
       this.emitQuestEvent({ type: 'pestClear', amount: 1 });
@@ -659,20 +670,25 @@ export class GameEngine {
       [crop]: ((prev && prev[crop]) || 0) + 1,
     }));
     this.setters.setExperience(prev => prev + 10);
-    this.setters.setFarm(prev => prev.map(p => (
-      p.id === plotId
-        ? {
-            ...p,
-            crop: null,
-            plantTime: null,
-            watered: false,
-            ready: false,
-            pest: false,
-            pestDays: 0,
-            fertilized: false,
-          }
-        : p
-    )));
+    this.setters.setFarm(prev => {
+      const safePrev = Array.isArray(prev) ? prev : [];
+      const nextFarm = safePrev.map(p => (
+        p.id === plotId
+          ? {
+              ...p,
+              crop: null,
+              plantTime: null,
+              watered: false,
+              ready: false,
+              pest: false,
+              pestDays: 0,
+              fertilized: false,
+            }
+          : p
+      ));
+      this.stateRef.current.farm = nextFarm;
+      return nextFarm;
+    });
 
     this.notify(`收成了 ${CROPS[crop].emoji}！已存入倉庫（估值 $${sellPrice}）。`, { type: 'success' });
     this.emitQuestEvent({ type: 'harvest', crop, amount: 1 });
@@ -686,11 +702,16 @@ export class GameEngine {
       return;
     }
 
-    this.setters.setFarm(prev => prev.map(plot =>
-      plot.id === plotId && plot.crop && !plot.watered
-        ? { ...plot, watered: true }
-        : plot
-    ));
+    this.setters.setFarm(prev => {
+      const safePrev = Array.isArray(prev) ? prev : [];
+      const nextFarm = safePrev.map(plot =>
+        plot.id === plotId && plot.crop && !plot.watered
+          ? { ...plot, watered: true }
+          : plot
+      );
+      this.stateRef.current.farm = nextFarm;
+      return nextFarm;
+    });
 
     this.setters.setEnergy(prev => Math.max(0, prev - energyCost));
     this.notify('澆水完成！', { type: 'success' });
@@ -898,13 +919,18 @@ export class GameEngine {
     }
 
     let built = false;
-    this.setters.setFarm(prev => prev.map(plot => {
-      if (plot.id === plotId && !plot.greenhouse) {
-        built = true;
-        return { ...plot, greenhouse: true };
-      }
-      return plot;
-    }));
+    this.setters.setFarm(prev => {
+      const safePrev = Array.isArray(prev) ? prev : [];
+      const nextFarm = safePrev.map(plot => {
+        if (plot.id === plotId && !plot.greenhouse) {
+          built = true;
+          return { ...plot, greenhouse: true };
+        }
+        return plot;
+      });
+      this.stateRef.current.farm = nextFarm;
+      return nextFarm;
+    });
 
     if (!built) {
       this.notify('暫時無法建造，請確認土地是否空閒。', { type: 'warning' });
