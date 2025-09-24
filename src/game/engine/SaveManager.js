@@ -90,6 +90,7 @@ export class SaveManager {
       questLog,
       dynamicQuests,
       ownedTools,
+      toolLevels,
     } = this.state;
 
     const safeFarm = Array.isArray(farm) ? farm : [];
@@ -126,6 +127,7 @@ export class SaveManager {
       questLog: questLog || {},
       dynamicQuests: dynamicQuests || {},
       ownedTools: Array.isArray(ownedTools) ? ownedTools : Array.from(ownedTools || []),
+      toolLevels: toolLevels && typeof toolLevels === 'object' ? { ...toolLevels } : {},
       saveTime: new Date().toISOString(),
       version: '1.1',
     };
@@ -191,6 +193,15 @@ export class SaveManager {
         normalizedOwned.unshift('basic');
       }
       this.setters.setOwnedTools(normalizedOwned);
+    }
+    if (typeof this.setters.setToolLevels === 'function') {
+      const levels = gameState.toolLevels && typeof gameState.toolLevels === 'object'
+        ? Object.entries(gameState.toolLevels).reduce((acc, [key, value]) => {
+            acc[key] = Math.max(0, Math.floor(value));
+            return acc;
+          }, {})
+        : {};
+      this.setters.setToolLevels(levels);
     }
     const sanitizedFarm = Array.isArray(gameState.farm)
       ? gameState.farm.map((plot, index) => ({
@@ -291,6 +302,7 @@ export class SaveManager {
           hunger: animal.hunger ?? 60,
           sick: animal.sick ?? false,
           productReady: Math.max(0, Math.floor(animal.productReady || 0)),
+          sicknessDays: Math.max(0, Math.floor(animal.sicknessDays ?? (animal.sick ? 1 : 0))),
         }))
       : [];
     this.setters.setAnimals(sanitizedAnimals);

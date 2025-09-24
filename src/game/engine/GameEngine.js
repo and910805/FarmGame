@@ -211,6 +211,41 @@ export class GameEngine {
     return building?.boost ?? 1;
   }
 
+  getToolUpgradeLevel(toolKey = this.state.tools) {
+    const { toolLevels } = this.state;
+    if (!toolKey) {
+      return 0;
+    }
+
+    if (!toolLevels || typeof toolLevels !== 'object') {
+      return 0;
+    }
+
+    const raw = toolLevels[toolKey];
+    if (typeof raw !== 'number') {
+      return 0;
+    }
+
+    return Math.max(0, Math.floor(raw));
+  }
+
+  getEffectiveToolStats(toolKey = this.state.tools) {
+    const baseTool = TOOLS[toolKey] || TOOLS.basic;
+    const level = this.getToolUpgradeLevel(toolKey);
+    const speedBonus = baseTool.speedUpgrade || 0;
+    const energyBonus = baseTool.energyUpgrade || 0;
+
+    const speedBoost = (baseTool.speedBoost || 1) + (level * speedBonus);
+    const energyReduction = (baseTool.energyReduction || 0) + (level * energyBonus);
+
+    return {
+      ...baseTool,
+      level,
+      speedBoost,
+      energyReduction,
+    };
+  }
+
   getSeedKey(seedType) {
     return `seed_${seedType}`;
   }
@@ -488,7 +523,8 @@ export class GameEngine {
     }
 
     const irrigationDiscount = this.getSprinklerPlantingDiscount();
-    const energyCost = Math.max(1, 10 - TOOLS[tools].energyReduction - irrigationDiscount);
+    const toolStats = this.getEffectiveToolStats(tools);
+    const energyCost = Math.max(1, 10 - toolStats.energyReduction - irrigationDiscount);
     if (energy < energyCost) {
       this.notify('體力不足！', { type: 'warning' });
       return;
@@ -657,6 +693,7 @@ export class GameEngine {
         hunger: 70,
         lastFed: Date.now(),
         sick: false,
+        sicknessDays: 0,
         name: `${animal.name}${baseIndex + index + 1}`,
         productReady: 0,
       }));
@@ -847,7 +884,7 @@ export class GameEngine {
     return true;
   }
 
-  buyTool(toolType) {
+  buyTool(toolType, options = {}) {
     const { money, tools, ownedTools } = this.state;
     const tool = TOOLS[toolType];
     if (!tool) {
@@ -856,7 +893,39 @@ export class GameEngine {
     }
 
     const ownedSet = new Set(Array.isArray(ownedTools) ? ownedTools : []);
+    const wantsUpgrade = Boolean(options.upgrade);
+
     if (ownedSet.has(toolType)) {
+      if (wantsUpgrade) {
+        if (!tool.upgradeCost) {
+          this.notify('這項工具無法再升級。', { type: 'info' });
+          return;
+        }
+
+        const currentLevel = this.getToolUpgradeLevel(toolType);
+        const nextLevel = currentLevel + 1;
+        const cost = tool.upgradeCost;
+        if (money < cost) {
+          this.notify('金錢不足，暫時無法升級工具。', { type: 'error' });
+          return;
+        }
+
+        const nextSpeed = (tool.speedBoost || 1) + (tool.speedUpgrade || 0) * nextLevel;
+        const nextEnergy = (tool.energyReduction || 0) + (tool.energyUpgrade || 0) * nextLevel;
+
+        this.setters.setMoney(prev => prev - cost);
+        if (typeof this.setters.setToolLevels === 'function') {
+          this.setters.setToolLevels(prev => {
+            const previous = prev && typeof prev === 'object' ? prev : {};
+            const current = previous[toolType] || 0;
+            return { ...previous, [toolType]: current + 1 };
+          });
+        }
+        this.setters.setTools(toolType);
+        this.notify(`升級 ${tool.name} 至 Lv.${nextLevel + 1}！速度提升至 ${Math.round(nextSpeed * 100)}%，體力節省 ${Math.round(nextEnergy)}。`, { type: 'success' });
+        return;
+      }
+
       if (tools === toolType) {
         this.notify('已經裝備這項工具囉！', { type: 'info' });
       } else {
@@ -864,6 +933,11 @@ export class GameEngine {
         this.notify(`切換為 ${tool.name}。`, { type: 'success' });
       }
       this.setters.setShowToolShop(false);
+      return;
+    }
+
+    if (wantsUpgrade) {
+      this.notify('需要先購買這項工具，才能升級。', { type: 'warning' });
       return;
     }
 
@@ -881,6 +955,15 @@ export class GameEngine {
           return prevList;
         }
         return [...prevList, toolType];
+      });
+    }
+    if (typeof this.setters.setToolLevels === 'function') {
+      this.setters.setToolLevels(prev => {
+        const previous = prev && typeof prev === 'object' ? prev : {};
+        if (toolType in previous) {
+          return previous;
+        }
+        return { ...previous, [toolType]: 0 };
       });
     }
     this.setters.setShowToolShop(false);
@@ -1045,6 +1128,7 @@ export class GameEngine {
             ...a,
             sick: false,
             happiness: Math.min(100, (a.happiness ?? ANIMALS[a.type].happiness) + 25),
+            sicknessDays: 0,
           }
         : a
     ));

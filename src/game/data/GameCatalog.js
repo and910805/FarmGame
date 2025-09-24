@@ -47,12 +47,19 @@ class Building extends BaseEntity {
 }
 
 class Tool extends BaseEntity {
-  constructor(key, { name, energyReduction, speedBoost, price }) {
+  constructor(
+    key,
+    { name, energyReduction, speedBoost, price, upgradeCost = null, speedUpgrade = 0, energyUpgrade = 0, repeatableUpgrade = false }
+  ) {
     super(key);
     this.name = name;
     this.energyReduction = energyReduction;
     this.speedBoost = speedBoost;
     this.price = price;
+    this.upgradeCost = upgradeCost;
+    this.speedUpgrade = speedUpgrade;
+    this.energyUpgrade = energyUpgrade;
+    this.repeatableUpgrade = repeatableUpgrade;
   }
 }
 
@@ -286,9 +293,19 @@ class GameCatalog {
 
     this.tools = {
       basic: new Tool('basic', { name: '基本工具', energyReduction: 0, speedBoost: 1, price: 0 }),
-      iron: new Tool('iron', { name: '鐵製工具', energyReduction: 2, speedBoost: 1.2, price: 500 }),
-      steel: new Tool('steel', { name: '鋼製工具', energyReduction: 4, speedBoost: 1.5, price: 1200 }),
-      magic: new Tool('magic', { name: '魔法工具', energyReduction: 6, speedBoost: 2, price: 3000 }),
+      copper: new Tool('copper', { name: '銅製工具', energyReduction: 1, speedBoost: 1.15, price: 300 }),
+      iron: new Tool('iron', { name: '鐵製工具', energyReduction: 2, speedBoost: 1.3, price: 700 }),
+      steel: new Tool('steel', { name: '鋼製工具', energyReduction: 3, speedBoost: 1.45, price: 1200 }),
+      mithril: new Tool('mithril', { name: '秘銀工具', energyReduction: 4, speedBoost: 1.6, price: 1800 }),
+      magic: new Tool('magic', {
+        name: '魔法工具',
+        energyReduction: 5,
+        speedBoost: 1.75,
+        price: 2500,
+        upgradeCost: 2500,
+        speedUpgrade: 0.15,
+        repeatableUpgrade: true,
+      }),
     };
 
     this.animalProducts = {
