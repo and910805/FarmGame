@@ -7,6 +7,43 @@ export const BASE_ANIMAL_CAPACITY = 6;
 export const ANIMAL_CAPACITY_STEP = 1;
 export const MAX_ANIMAL_CAPACITY = 24;
 
+export const ANIMAL_CARE_ACTIONS = {
+  playtime: {
+    key: 'playtime',
+    label: '陪牠玩耍',
+    shortLabel: '陪玩',
+    needLabel: '想玩耍',
+    description: '與動物一起玩耍可以大幅提升幸福度與羈絆，但會稍微增加飢餓感。',
+    energyCost: 6,
+    happinessBoost: 18,
+    bondBoost: 14,
+    hungerImpact: 14,
+  },
+  grooming: {
+    key: 'grooming',
+    label: '梳洗打理',
+    shortLabel: '梳洗',
+    needLabel: '想梳洗',
+    description: '細心梳洗讓動物保持乾淨舒適，降低生病風險並增加羈絆。',
+    energyCost: 5,
+    happinessBoost: 12,
+    bondBoost: 10,
+    cleanlinessBoost: 22,
+    sootheSickness: true,
+  },
+  cleanPen: {
+    key: 'cleanPen',
+    label: '清理欄舍',
+    shortLabel: '清理',
+    needLabel: '需要清理',
+    description: '整理環境讓欄舍更乾淨，恢復整潔度並讓動物更安心。',
+    energyCost: 7,
+    happinessBoost: 8,
+    bondBoost: 8,
+    cleanlinessBoost: 28,
+  },
+};
+
 export const getFarmExpansionCost = (currentPlotCount) => {
   if (currentPlotCount >= MAX_FARM_PLOTS) {
     return null;
@@ -774,6 +811,11 @@ export class GameEngine {
         sicknessDays: 0,
         name: `${animal.name}${baseIndex + index + 1}`,
         productReady: 0,
+        bond: 20,
+        cleanliness: 85,
+        careNeed: null,
+        careDays: 0,
+        lastCareTime: null,
       }));
       return [...prevList, ...additions];
     });
@@ -1176,6 +1218,124 @@ export class GameEngine {
     }
   }
 
+  careForAnimal(animalId, actionKey) {
+    const { animals = [], energy } = this.state;
+    if (!Array.isArray(animals) || animals.length === 0) {
+      this.notify('目前還沒有動物可互動。', { type: 'info' });
+      return;
+    }
+
+    const action = ANIMAL_CARE_ACTIONS[actionKey];
+    if (!action) {
+      return;
+    }
+
+    const animal = animals.find(entry => entry.id === animalId);
+    if (!animal) {
+      this.notify('找不到這隻動物。', { type: 'error' });
+      return;
+    }
+
+    if (energy < action.energyCost) {
+      this.notify('體力不足，稍作休息再來陪伴牠們吧！', { type: 'warning' });
+      return;
+    }
+
+    const animalData = ANIMALS[animal.type];
+    if (!animalData) {
+      return;
+    }
+
+    this.setters.setEnergy(prev => {
+      const updated = Math.max(0, prev - action.energyCost);
+      this.stateRef.current.energy = updated;
+      return updated;
+    });
+
+    const previousBond = animal.bond ?? 0;
+    let resolvedNeed = false;
+    let soothed = false;
+    let cleanlinessGain = 0;
+    let resultingBond = null;
+
+    this.setters.setAnimals(prev => {
+      const baseList = Array.isArray(prev) ? prev : [];
+      const nextList = baseList.map(entry => {
+        if (entry.id !== animalId) {
+          return entry;
+        }
+
+        const baseHappiness = entry.happiness ?? animalData.happiness ?? 50;
+        const baseHunger = entry.hunger ?? 60;
+        const baseBond = entry.bond ?? 0;
+        const baseCleanliness = entry.cleanliness ?? 70;
+        const hungerImpact = action.hungerImpact ?? 0;
+        const cleanlinessBoost = action.cleanlinessBoost ?? 0;
+        const needResolved = entry.careNeed === actionKey;
+
+        let nextSicknessDays = entry.sicknessDays ?? (entry.sick ? 1 : 0);
+        let nextSick = entry.sick ?? false;
+        if (action.sootheSickness && nextSick) {
+          nextSicknessDays = Math.max(0, nextSicknessDays - 1);
+          if (nextSicknessDays <= 0 || Math.random() < 0.35) {
+            nextSick = false;
+            nextSicknessDays = 0;
+            soothed = true;
+          }
+        }
+
+        const nextHappinessBase = baseHappiness + action.happinessBoost + (needResolved ? 6 : 0);
+        const nextHunger = Math.max(0, Math.min(100, baseHunger - hungerImpact));
+        const nextBond = Math.min(100, baseBond + action.bondBoost);
+        const nextCleanliness = Math.max(0, Math.min(100, baseCleanliness + cleanlinessBoost));
+        resolvedNeed = resolvedNeed || needResolved;
+        cleanlinessGain = Math.max(cleanlinessGain, Math.max(0, nextCleanliness - baseCleanliness));
+        resultingBond = nextBond;
+
+        const nextState = {
+          ...entry,
+          happiness: Math.min(100, Math.max(0, nextHappinessBase)),
+          hunger: nextHunger,
+          bond: nextBond,
+          cleanliness: nextCleanliness,
+          careNeed: needResolved ? null : entry.careNeed ?? null,
+          careDays: needResolved ? 0 : entry.careDays ?? 0,
+          lastCareTime: Date.now(),
+          sick: nextSick,
+          sicknessDays: nextSicknessDays,
+        };
+
+        return nextState;
+      });
+
+      this.stateRef.current.animals = nextList;
+      return nextList;
+    });
+
+    const actionLabel = action.shortLabel || action.label;
+    const message = resolvedNeed
+      ? `${animal.name} 得到了期待已久的${actionLabel}時間！`
+      : `與 ${animal.name} 進行了${actionLabel}，感情升溫囉！`;
+
+    this.notify(`🐾 ${message}`, { type: resolvedNeed ? 'success' : 'info' });
+
+    if (cleanlinessGain > 0 && action.cleanlinessBoost) {
+      this.notify(`${animal.name} 的欄舍煥然一新，感覺更加舒適！`, { type: 'info' });
+    }
+
+    if (soothed) {
+      this.notify(`${animal.name} 的不適大幅緩解，看起來好多了。`, { type: 'success' });
+    }
+
+    const milestones = [30, 60, 90];
+    if (resultingBond != null) {
+      const reached = milestones.filter(threshold => previousBond < threshold && resultingBond >= threshold);
+      if (reached.length > 0) {
+        this.notify(`💞 與 ${animal.name} 的羈絆提升到 ${Math.round(resultingBond)}！`, { type: 'success' });
+      }
+    }
+  }
+
   feedAnimal(animalId) {
     const { animals, money } = this.state;
     const animal = animals.find(a => a.id === animalId);
@@ -1194,16 +1354,21 @@ export class GameEngine {
     }
 
     this.setters.setMoney(prev => prev - cost);
-    this.setters.setAnimals(prev => prev.map(a =>
-      a.id === animalId
-        ? {
-            ...a,
-            happiness: Math.min(100, (a.happiness ?? ANIMALS[a.type].happiness) + 20),
-            hunger: Math.min(100, currentHunger + 40),
-            lastFed: Date.now(),
-          }
-        : a
-    ));
+    this.setters.setAnimals(prev => {
+      const nextList = prev.map(a =>
+        a.id === animalId
+          ? {
+              ...a,
+              happiness: Math.min(100, (a.happiness ?? ANIMALS[a.type].happiness) + 20),
+              hunger: Math.min(100, currentHunger + 40),
+              lastFed: Date.now(),
+              bond: Math.min(100, (a.bond ?? 0) + 4),
+            }
+          : a
+      );
+      this.stateRef.current.animals = nextList;
+      return nextList;
+    });
     this.notify(`餵食了 ${animal.name}！`, { type: 'success' });
   }
 
@@ -1224,16 +1389,21 @@ export class GameEngine {
       return;
     }
 
-    this.setters.setAnimals(prev => prev.map(a =>
-      a.id === animalId
-        ? {
-            ...a,
-            sick: false,
-            happiness: Math.min(100, (a.happiness ?? ANIMALS[a.type].happiness) + 25),
-            sicknessDays: 0,
-          }
-        : a
-    ));
+    this.setters.setAnimals(prev => {
+      const nextList = prev.map(a =>
+        a.id === animalId
+          ? {
+              ...a,
+              sick: false,
+              happiness: Math.min(100, (a.happiness ?? ANIMALS[a.type].happiness) + 25),
+              sicknessDays: 0,
+              bond: Math.min(100, (a.bond ?? 0) + 6),
+            }
+          : a
+      );
+      this.stateRef.current.animals = nextList;
+      return nextList;
+    });
 
     this.consumeSupply('medicine', { keepSelection: medicineCount > 1 });
     this.notify(`已替 ${animal.name} 使用營養劑，狀況好多了！`, { type: 'success' });
@@ -1265,11 +1435,15 @@ export class GameEngine {
     }
 
     const product = ANIMAL_PRODUCTS[animalData.product];
-    this.setters.setAnimals(prev => prev.map(entry => (
-      entry.id === animalId
-        ? { ...entry, productReady: 0, lastCollected: Date.now() }
-        : entry
-    )));
+    this.setters.setAnimals(prev => {
+      const nextList = prev.map(entry => (
+        entry.id === animalId
+          ? { ...entry, productReady: 0, lastCollected: Date.now(), bond: Math.min(100, (entry.bond ?? 0) + 2) }
+          : entry
+      ));
+      this.stateRef.current.animals = nextList;
+      return nextList;
+    });
 
     this.setters.setInventory(prev => ({
       ...prev,

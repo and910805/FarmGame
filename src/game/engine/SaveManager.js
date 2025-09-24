@@ -1,5 +1,12 @@
 import { ANIMALS, CROPS, ANIMAL_PRODUCTS } from '../data/GameCatalog';
-import { BASE_ANIMAL_CAPACITY, MAX_ANIMAL_CAPACITY, BASE_FARM_PLOTS, MAX_FARM_PLOTS, BUILDING_UPGRADES } from './GameEngine';
+import {
+  BASE_ANIMAL_CAPACITY,
+  MAX_ANIMAL_CAPACITY,
+  BASE_FARM_PLOTS,
+  MAX_FARM_PLOTS,
+  BUILDING_UPGRADES,
+  ANIMAL_CARE_ACTIONS,
+} from './GameEngine';
 
 const createDefaultInventory = () => {
   const inventory = {};
@@ -304,6 +311,11 @@ export class SaveManager {
           sick: animal.sick ?? false,
           productReady: Math.max(0, Math.floor(animal.productReady || 0)),
           sicknessDays: Math.max(0, Math.floor(animal.sicknessDays ?? (animal.sick ? 1 : 0))),
+          bond: Math.max(0, Math.min(100, Math.floor(animal.bond ?? 20))),
+          cleanliness: Math.max(0, Math.min(100, Math.floor(animal.cleanliness ?? 80))),
+          careNeed: animal.careNeed && ANIMAL_CARE_ACTIONS[animal.careNeed] ? animal.careNeed : null,
+          careDays: Math.max(0, Math.floor(animal.careDays ?? 0)),
+          lastCareTime: animal.lastCareTime ?? null,
         }))
       : [];
     this.setters.setAnimals(sanitizedAnimals);

@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { Sprout, Coins, ShoppingCart, Heart, Home, Sun, Moon, Zap, Droplets, Hammer, Building, Star, Save, Trophy, Settings, MessageCircle, Target, UtensilsCrossed, TrendingUp, TrendingDown, Clock3, Boxes } from 'lucide-react';
+import { Sprout, Coins, ShoppingCart, Heart, Home, Sun, Moon, Zap, Droplets, Hammer, Building, Star, Save, Trophy, Settings, MessageCircle, Target, UtensilsCrossed, TrendingUp, TrendingDown, Clock3, Boxes, Sparkles } from 'lucide-react';
 import { CROPS, ANIMALS, BUILDINGS, TOOLS, ACHIEVEMENTS, NPCS, WEATHER_TYPES, SEASONS, FARM_SUPPLIES, ANIMAL_PRODUCTS } from './game/data/GameCatalog';
 import { GameFormatter } from './game/utils/GameFormatter';
-import { GameEngine, getFarmExpansionCost, getAnimalHousingExpansionCost, BASE_FARM_PLOTS, MAX_FARM_PLOTS, BASE_ANIMAL_CAPACITY, MAX_ANIMAL_CAPACITY, FARM_EXPANSION_BATCH, ANIMAL_CAPACITY_STEP, BUILDING_UPGRADES } from './game/engine/GameEngine';
+import { GameEngine, getFarmExpansionCost, getAnimalHousingExpansionCost, BASE_FARM_PLOTS, MAX_FARM_PLOTS, BASE_ANIMAL_CAPACITY, MAX_ANIMAL_CAPACITY, FARM_EXPANSION_BATCH, ANIMAL_CAPACITY_STEP, BUILDING_UPGRADES, ANIMAL_CARE_ACTIONS } from './game/engine/GameEngine';
 import { SaveManager } from './game/engine/SaveManager';
 import { NotificationCenter } from './game/engine/NotificationCenter';
 import { createInitialInventory, INVENTORY_METADATA, INVENTORY_ORDER } from './game/state/InventoryState';
@@ -28,7 +28,24 @@ const ANIMAL_ECOLOGY_CONFIG = {
     happinessWeight: 0.003,
     hungerWeight: 0.0025,
     maxPairsPerType: 3,
+    bondThreshold: 55,
+    bondWeight: 0.0015,
   },
+};
+
+const ANIMAL_INTERACTION_CONFIG = {
+  dailyNeedChance: 0.5,
+  skipHappinessPenalty: 8,
+  escalatedPenalty: 14,
+  neglectBondPenalty: 4,
+  neglectSicknessChance: 0.2,
+  bondDecay: 1,
+  cleanlinessDecay: 7,
+  cleanlinessThreshold: 48,
+  severeCleanlinessThreshold: 28,
+  cleanlinessHappinessPenalty: 6,
+  severeCleanlinessPenalty: 12,
+  cleanlinessSicknessChance: 0.22,
 };
 
 const FarmGame = () => {
@@ -681,6 +698,10 @@ const FarmGame = () => {
             const outbreakVictims = [];
             const overcrowdAlerts = [];
             const newbornAnimals = [];
+            const careReminders = [];
+            const careWarnings = [];
+            const dirtyPens = [];
+            const filthyPens = [];
             const breedingPools = {};
             const capacityLimit = Math.max(animalCapacity || BASE_ANIMAL_CAPACITY, BASE_ANIMAL_CAPACITY);
 
@@ -708,6 +729,60 @@ const FarmGame = () => {
               let sick = Boolean(animal.sick);
               const wasSick = Boolean(animal.sick);
               let sicknessDays = animal.sicknessDays ?? (wasSick ? 1 : 0);
+
+              let bond = Math.max(0, animal.bond ?? 0);
+              bond = Math.max(0, Math.min(100, bond - ANIMAL_INTERACTION_CONFIG.bondDecay));
+              let cleanliness = Math.max(0, animal.cleanliness ?? 80);
+              cleanliness = Math.max(0, Math.min(100, cleanliness - ANIMAL_INTERACTION_CONFIG.cleanlinessDecay));
+
+              let careNeed = animal.careNeed && ANIMAL_CARE_ACTIONS[animal.careNeed] ? animal.careNeed : null;
+              let careDays = Math.max(0, animal.careDays ?? 0);
+              const careKeys = Object.keys(ANIMAL_CARE_ACTIONS);
+              const prioritizeCleaning = cleanliness < ANIMAL_INTERACTION_CONFIG.cleanlinessThreshold && ANIMAL_CARE_ACTIONS.cleanPen;
+
+              if (!careNeed && careKeys.length > 0) {
+                if (prioritizeCleaning) {
+                  careNeed = 'cleanPen';
+                  careDays = 1;
+                } else if (Math.random() < ANIMAL_INTERACTION_CONFIG.dailyNeedChance) {
+                  const randomKey = careKeys[Math.floor(Math.random() * careKeys.length)];
+                  careNeed = randomKey;
+                  careDays = 1;
+                } else {
+                  careDays = 0;
+                }
+
+                if (careNeed) {
+                  const meta = ANIMAL_CARE_ACTIONS[careNeed];
+                  if (meta) {
+                    careReminders.push(`${animal.name} 想要${meta.shortLabel}`);
+                  }
+                }
+              } else if (careNeed) {
+                const meta = ANIMAL_CARE_ACTIONS[careNeed];
+                careDays = Math.max(1, careDays + 1);
+                if (meta) {
+                  careReminders.push(`${animal.name} 需要${meta.shortLabel}`);
+                  if (careDays >= 2) {
+                    const penalty = careDays >= 3
+                      ? ANIMAL_INTERACTION_CONFIG.escalatedPenalty
+                      : ANIMAL_INTERACTION_CONFIG.skipHappinessPenalty;
+                    happiness = Math.max(0, happiness - penalty);
+                    bond = Math.max(0, bond - ANIMAL_INTERACTION_CONFIG.neglectBondPenalty);
+                    if (careDays >= 3) {
+                      careWarnings.push(`${animal.name}（${meta.shortLabel}）`);
+                    }
+                    const sicknessChance = ANIMAL_INTERACTION_CONFIG.neglectSicknessChance * Math.max(1, careDays - 1);
+                    if (!sick && Math.random() < sicknessChance) {
+                      sick = true;
+                      newlySick.push(animal.name);
+                    }
+                  }
+                }
+              } else {
+                careDays = 0;
+              }
+
               let canProduce = happiness > 25 && hunger > ANIMAL_ECOLOGY_CONFIG.hungerWarningThreshold;
 
               if (hunger <= ANIMAL_ECOLOGY_CONFIG.severeHungerThreshold) {
@@ -723,6 +798,20 @@ const FarmGame = () => {
               if (!sick && (hunger <= ANIMAL_ECOLOGY_CONFIG.sicknessTriggerThreshold || happiness <= ANIMAL_ECOLOGY_CONFIG.sicknessTriggerThreshold)) {
                 sick = true;
                 newlySick.push(animal.name);
+              }
+
+              if (cleanliness < ANIMAL_INTERACTION_CONFIG.cleanlinessThreshold) {
+                dirtyPens.push(animal.name);
+                happiness = Math.max(0, happiness - ANIMAL_INTERACTION_CONFIG.cleanlinessHappinessPenalty);
+              }
+              if (cleanliness < ANIMAL_INTERACTION_CONFIG.severeCleanlinessThreshold) {
+                filthyPens.push(animal.name);
+                happiness = Math.max(0, happiness - ANIMAL_INTERACTION_CONFIG.severeCleanlinessPenalty);
+                bond = Math.max(0, bond - 1);
+                if (!sick && Math.random() < ANIMAL_INTERACTION_CONFIG.cleanlinessSicknessChance) {
+                  sick = true;
+                  newlySick.push(animal.name);
+                }
               }
 
               if (sick) {
@@ -765,7 +854,7 @@ const FarmGame = () => {
                 if (!breedingPools[animal.type]) {
                   breedingPools[animal.type] = [];
                 }
-                breedingPools[animal.type].push({ happiness, hunger });
+                breedingPools[animal.type].push({ happiness, hunger, bond });
               }
 
               list.push({
@@ -775,6 +864,10 @@ const FarmGame = () => {
                 sick,
                 sicknessDays,
                 productReady,
+                bond: Math.max(0, Math.min(100, bond)),
+                cleanliness: Math.max(0, Math.min(100, cleanliness)),
+                careNeed: careNeed || null,
+                careDays: careNeed ? careDays : 0,
               });
               return list;
             }, []);
@@ -843,10 +936,12 @@ const FarmGame = () => {
 
               const averageHappiness = candidates.reduce((sum, entry) => sum + entry.happiness, 0) / candidates.length;
               const averageHunger = candidates.reduce((sum, entry) => sum + entry.hunger, 0) / candidates.length;
+              const averageBond = candidates.reduce((sum, entry) => sum + (entry.bond ?? 0), 0) / candidates.length;
               const pairCount = Math.min(Math.floor(candidates.length / 2), ANIMAL_ECOLOGY_CONFIG.breeding.maxPairsPerType);
               const chance = ANIMAL_ECOLOGY_CONFIG.breeding.baseChance
                 + Math.max(0, (averageHappiness - ANIMAL_ECOLOGY_CONFIG.breeding.happyThreshold) * ANIMAL_ECOLOGY_CONFIG.breeding.happinessWeight)
-                + Math.max(0, (averageHunger - ANIMAL_ECOLOGY_CONFIG.breeding.wellFedThreshold) * ANIMAL_ECOLOGY_CONFIG.breeding.hungerWeight);
+                + Math.max(0, (averageHunger - ANIMAL_ECOLOGY_CONFIG.breeding.wellFedThreshold) * ANIMAL_ECOLOGY_CONFIG.breeding.hungerWeight)
+                + Math.max(0, (averageBond - ANIMAL_ECOLOGY_CONFIG.breeding.bondThreshold) * ANIMAL_ECOLOGY_CONFIG.breeding.bondWeight);
 
               for (let attempt = 0; attempt < pairCount && availableSlots > 0; attempt += 1) {
                 if (Math.random() < chance) {
@@ -864,6 +959,11 @@ const FarmGame = () => {
                     sicknessDays: 0,
                     name: babyName,
                     productReady: 0,
+                    bond: 35,
+                    cleanliness: 82,
+                    careNeed: null,
+                    careDays: 0,
+                    lastCareTime: null,
                   });
                   availableSlots -= 1;
                 }
@@ -909,12 +1009,34 @@ const FarmGame = () => {
               addNotification('🐏 動物棲位過於擁擠，建議擴建欄舍或調整飼養量！', { type: 'warning' });
             }
 
+            if (careReminders.length > 0) {
+              const reminders = Array.from(new Set(careReminders));
+              addNotification(`🐾 ${reminders.join('、')}，多陪陪牠們吧！`, { type: 'info' });
+            }
+
+            if (careWarnings.length > 0) {
+              const warnings = Array.from(new Set(careWarnings));
+              addNotification(`⚠️ ${warnings.join('、')} 渴望照護，再忽略可能會生病！`, { type: 'warning' });
+            }
+
+            const urgentDirty = Array.from(new Set(filthyPens));
+            if (urgentDirty.length > 0) {
+              addNotification(`🧼 ${urgentDirty.join('、')} 的欄舍太髒亂了，立即清理以避免疾病！`, { type: 'error' });
+            }
+
+            const regularDirty = Array.from(new Set(dirtyPens.filter(name => !filthyPens.includes(name))));
+            if (regularDirty.length > 0) {
+              addNotification(`🧹 ${regularDirty.join('、')} 的欄舍需要整理，保持清潔讓牠們更安心。`, { type: 'warning' });
+            }
+
             if (newbornAnimals.length > 0) {
               const names = newbornAnimals.map(animal => animal.name).join('、');
               addNotification(`🐣 ${names} 出生了，農場又更熱鬧了！`, { type: 'success' });
             }
 
-            return [...processedAnimals, ...newbornAnimals];
+            const nextAnimals = [...processedAnimals, ...newbornAnimals];
+            stateRef.current.animals = nextAnimals;
+            return nextAnimals;
           });
 
           if (Object.keys(producedGoods).length > 0) {
@@ -1253,6 +1375,10 @@ const FarmGame = () => {
     gameEngine.treatAnimal(animalId);
   }, [gameEngine]);
 
+  const careForAnimal = useCallback((animalId, actionKey) => {
+    gameEngine.careForAnimal(animalId, actionKey);
+  }, [gameEngine]);
+
   const interactNPC = (npc) => {
     setCurrentNPC(npc);
     setShowNPCDialog(true);
@@ -1547,6 +1673,12 @@ const FarmGame = () => {
                     const productInfo = animalData.product ? ANIMAL_PRODUCTS[animalData.product] : null;
                     const readyCount = Math.max(0, Math.floor(animal.productReady || 0));
                     const canCollectProduct = Boolean(productInfo) && readyCount > 0;
+                    const bondValue = Math.max(0, Math.round(animal.bond ?? 0));
+                    const cleanlinessValue = Math.max(0, Math.round(animal.cleanliness ?? 0));
+                    const careNeed = animal.careNeed;
+                    const careMeta = careNeed ? ANIMAL_CARE_ACTIONS[careNeed] : null;
+                    const careDays = Math.max(0, animal.careDays ?? 0);
+                    const careUrgent = careDays >= 3;
                     return (
                       <div key={animal.id}
                            className={`rounded-lg p-3 transition-colors relative border ${
@@ -1589,6 +1721,51 @@ const FarmGame = () => {
                               <div className={`h-1 rounded-full transition-all duration-300 ${isHungry ? 'bg-orange-400' : 'bg-yellow-400'}`}
                                    style={{ width: `${Math.max(0, Math.min(100, hunger))}%` }}></div>
                             </div>
+                            <div className="flex items-center justify-center gap-1 mt-2">
+                              <Sparkles className="w-3 h-3 text-purple-400" />
+                              <span>羈絆 {bondValue}/100</span>
+                            </div>
+                            <div className="bg-gray-200 rounded-full h-1">
+                              <div className="bg-purple-400 h-1 rounded-full transition-all duration-300"
+                                   style={{ width: `${Math.min(100, bondValue)}%` }}></div>
+                            </div>
+                            <div className="flex items-center justify-center gap-1 mt-2">
+                              <Droplets className={`w-3 h-3 ${cleanlinessValue < 30 ? 'text-red-500' : cleanlinessValue < 60 ? 'text-yellow-500' : 'text-teal-500'}`} />
+                              <span>整潔 {cleanlinessValue}%</span>
+                            </div>
+                            <div className="bg-gray-200 rounded-full h-1">
+                              <div className={`h-1 rounded-full transition-all duration-300 ${cleanlinessValue < 30 ? 'bg-red-400' : cleanlinessValue < 60 ? 'bg-yellow-400' : 'bg-teal-400'}`}
+                                   style={{ width: `${Math.min(100, cleanlinessValue)}%` }}></div>
+                            </div>
+                          </div>
+                          <div className={`text-xs mt-2 ${careNeed ? (careUrgent ? 'text-red-600 font-semibold' : 'text-purple-700') : 'text-emerald-600'}`}>
+                            {careNeed
+                              ? `需要：${careMeta?.shortLabel || careMeta?.label || '照護'}${careDays > 1 ? `（等待第 ${careDays} 天）` : ''}`
+                              : '狀態穩定，感謝你的照顧！'}
+                          </div>
+                          <div className="grid grid-cols-3 gap-1 mt-2">
+                            {Object.values(ANIMAL_CARE_ACTIONS).map(action => {
+                              const isRequested = careNeed === action.key;
+                              const insufficientEnergy = energy < action.energyCost;
+                              return (
+                                <button
+                                  key={action.key}
+                                  type="button"
+                                  onClick={() => careForAnimal(animal.id, action.key)}
+                                  disabled={insufficientEnergy}
+                                  title={action.description}
+                                  className={`text-[10px] font-semibold py-1 rounded transition-colors ${insufficientEnergy
+                                    ? 'bg-purple-50 text-purple-300 cursor-not-allowed opacity-60'
+                                    : isRequested
+                                      ? 'bg-purple-400 hover:bg-purple-500 text-purple-900'
+                                      : 'bg-purple-100 hover:bg-purple-200 text-purple-700'
+                                  }`}
+                                >
+                                  {action.shortLabel || action.label}
+                                  <span className="block text-[9px] font-normal">體力 -{action.energyCost}</span>
+                                </button>
+                              );
+                            })}
                           </div>
                           {productInfo ? (
                             <div className="text-xs text-amber-600">
