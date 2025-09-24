@@ -618,7 +618,7 @@ const FarmGame = () => {
         
         switch (achievement.id) {
           case 'firstPlant':
-            unlocked = farm.some(plot => plot.crop);
+            unlocked = farm.some(plot => plot.crop && CROPS[plot.crop]);
             break;
           case 'richFarmer':
             unlocked = money >= 10000;
@@ -941,14 +941,28 @@ const FarmGame = () => {
             const nextFarm = prevFarm.map(plot => {
               let updatedPlot = plot;
 
-              if (plot.crop) {
-                const originalCrop = CROPS[plot.crop];
+              const originalCrop = plot?.crop ? CROPS[plot.crop] : null;
+
+              if (plot?.crop && !originalCrop) {
+                const clearedPlot = {
+                  ...plot,
+                  crop: null,
+                  plantTime: null,
+                  watered: false,
+                  fertilized: false,
+                  pest: false,
+                  pestDays: 0,
+                  ready: false,
+                };
+                changed = true;
+                return clearedPlot;
+              }
+
+              if (originalCrop) {
                 if (!plot.ready && !plot.pest) {
                   const pestChance = plot.fertilized ? 0.05 : 0.12;
                   if (Math.random() < pestChance) {
-                    if (originalCrop) {
-                      infestedCrops.push(originalCrop.name);
-                    }
+                    infestedCrops.push(originalCrop.name);
                     updatedPlot = { ...plot, pest: true, pestDays: 1 };
                   }
                 }
@@ -957,10 +971,7 @@ const FarmGame = () => {
                   const currentDays = updatedPlot.pestDays ?? 0;
                   const nextDays = currentDays + (plot.pest ? 1 : 0);
                   if (!updatedPlot.ready && nextDays >= 3) {
-                    const damagedCrop = updatedPlot.crop ? CROPS[updatedPlot.crop] : null;
-                    if (damagedCrop) {
-                      destroyedCrops.push(damagedCrop.name);
-                    }
+                    destroyedCrops.push(originalCrop.name);
                     updatedPlot = {
                       ...updatedPlot,
                       crop: null,
@@ -1012,7 +1023,7 @@ const FarmGame = () => {
 
             let processedFarm = nextFarm;
 
-            const vulnerableForStorm = processedFarm.filter(plot => plot.crop && !plot.greenhouse);
+            const vulnerableForStorm = processedFarm.filter(plot => plot.crop && CROPS[plot.crop] && !plot.greenhouse);
             if (vulnerableForStorm.length > 0 && Math.random() < 0.12) {
               const hits = Math.max(1, Math.ceil(vulnerableForStorm.length * 0.25));
               const selectedIds = new Set();
@@ -1043,7 +1054,7 @@ const FarmGame = () => {
               });
             }
 
-            const vulnerableForBlight = processedFarm.filter(plot => plot.crop && !plot.greenhouse && !plot.ready && !plot.pest);
+            const vulnerableForBlight = processedFarm.filter(plot => plot.crop && CROPS[plot.crop] && !plot.greenhouse && !plot.ready && !plot.pest);
             if (vulnerableForBlight.length > 0 && Math.random() < 0.09) {
               const hits = Math.max(1, Math.ceil(vulnerableForBlight.length * 0.3));
               const selectedIds = new Set();
@@ -1135,8 +1146,20 @@ const FarmGame = () => {
     const growTimer = setInterval(() => {
       setFarm(prev => prev.map(plot => {
         if (plot.crop && plot.plantTime && !plot.pest) {
+          const cropData = plot.crop ? CROPS[plot.crop] : null;
+          if (!cropData) {
+            return {
+              ...plot,
+              crop: null,
+              plantTime: null,
+              watered: false,
+              fertilized: false,
+              pest: false,
+              pestDays: 0,
+              ready: false,
+            };
+          }
           const now = Date.now();
-          const cropData = CROPS[plot.crop];
 
           let weatherMultiplier = plot.greenhouse ? 1.2 : (cropData.weatherBonus[weather] || 1);
           const seasonMultiplier = plot.greenhouse ? 1 : (cropData.seasonBonus?.[season] ?? 1);
@@ -1383,9 +1406,11 @@ const FarmGame = () => {
             )}
             <div className="grid grid-cols-5 gap-2 mb-4">
               {farm.map((plot) => {
-                const isReady = Boolean(plot.crop && plot.ready);
+                const cropInfo = plot?.crop ? CROPS[plot.crop] : null;
+                const hasValidCrop = Boolean(cropInfo);
+                const isReady = Boolean(hasValidCrop && plot.ready);
                 const isGreenhouse = Boolean(plot.greenhouse);
-                const isEmpty = !plot.crop;
+                const isEmpty = !hasValidCrop;
                 const highlightForPlacement = pendingGreenhousePlacement && !isGreenhouse;
 
                 let tileStyle = '';
@@ -1395,7 +1420,7 @@ const FarmGame = () => {
                   tileStyle = isEmpty
                     ? 'bg-teal-50 border-teal-400'
                     : 'bg-teal-100 border-teal-400';
-                } else if (plot.crop) {
+                } else if (hasValidCrop) {
                   tileStyle = 'bg-lime-100 border-lime-400';
                 } else {
                   tileStyle = 'bg-gray-100 border-gray-300 hover:bg-green-50';
@@ -1423,11 +1448,11 @@ const FarmGame = () => {
                            }
                          }
 
-                         if (plot.crop && plot.ready) {
+                         if (hasValidCrop && plot.ready) {
                            harvestCrop(plot.id);
-                         } else if (!plot.crop && selectedSeed) {
+                         } else if (!hasValidCrop && selectedSeed) {
                            plantSeed(plot.id);
-                         } else if (plot.crop && !plot.watered) {
+                         } else if (hasValidCrop && !plot.watered) {
                            waterPlot(plot.id);
                          }
                        }}>
@@ -1435,21 +1460,21 @@ const FarmGame = () => {
                       {plot.greenhouse && (
                         <div className="absolute top-0 right-0 text-xs">🏢</div>
                       )}
-                      {plot.pest && (
+                      {hasValidCrop && plot.pest && (
                         <div className="absolute top-0 left-0 text-xs animate-bounce">🐛</div>
                       )}
-                      {plot.fertilized && !plot.ready && (
+                      {hasValidCrop && plot.fertilized && !plot.ready && (
                         <div className="absolute bottom-1 right-1 text-xs">🌿</div>
                       )}
-                      {plot.crop ? (
+                      {hasValidCrop ? (
                         <>
                           <div className={`transform transition-transform duration-500 ${
                             plot.ready ? 'scale-125 animate-bounce' : 'scale-100'
                           }`}>
-                            {CROPS[plot.crop].emoji}
+                            {cropInfo.emoji}
                           </div>
                           <div className="flex absolute bottom-0 left-0 right-0 justify-center">
-                            {plot.watered && <Droplets className="w-3 h-3 text-blue-400" />}
+                            {hasValidCrop && plot.watered && <Droplets className="w-3 h-3 text-blue-400" />}
                           </div>
                         </>
                       ) : (
