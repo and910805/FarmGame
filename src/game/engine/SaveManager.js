@@ -288,6 +288,7 @@ export class SaveManager {
     }
 
     this.setters.setFarm(normalizedFarm);
+    this.stateRef.current.farm = normalizedFarm;
     const baseSupplies = { ...createDefaultSupplies(), ...(gameState.farmSupplies || {}) };
     Object.entries(normalizedInventory).forEach(([key, value]) => {
       if (key.startsWith('seed_')) {

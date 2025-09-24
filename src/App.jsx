@@ -1071,7 +1071,9 @@ const FarmGame = () => {
               });
             }
 
-            return changed ? processedFarm : prevFarm;
+            const resultFarm = changed ? processedFarm : prevFarm;
+            stateRef.current.farm = resultFarm;
+            return resultFarm;
           });
 
           if (infestedCrops.length > 0) {
@@ -1133,26 +1135,30 @@ const FarmGame = () => {
   // 作物成長系統
   useEffect(() => {
     const growTimer = setInterval(() => {
-      setFarm(prev => prev.map(plot => {
-        if (plot.crop && plot.plantTime && !plot.pest) {
-          const now = Date.now();
-          const cropData = CROPS[plot.crop];
+      setFarm(prev => {
+        const updatedFarm = prev.map(plot => {
+          if (plot.crop && plot.plantTime && !plot.pest) {
+            const now = Date.now();
+            const cropData = CROPS[plot.crop];
 
-          let weatherMultiplier = plot.greenhouse ? 1.2 : (cropData.weatherBonus[weather] || 1);
-          const seasonMultiplier = plot.greenhouse ? 1 : (cropData.seasonBonus?.[season] ?? 1);
-          const toolMultiplier = effectiveToolStats.speedBoost;
-          const fertilizerBoost = plot.fertilized ? 1.25 : 1;
+            let weatherMultiplier = plot.greenhouse ? 1.2 : (cropData.weatherBonus[weather] || 1);
+            const seasonMultiplier = plot.greenhouse ? 1 : (cropData.seasonBonus?.[season] ?? 1);
+            const toolMultiplier = effectiveToolStats.speedBoost;
+            const fertilizerBoost = plot.fertilized ? 1.25 : 1;
 
-          const adjustedGrowTime = (cropData.growTime * 60000)
-            / (weatherMultiplier * toolMultiplier * fertilizerBoost * seasonMultiplier);
+            const adjustedGrowTime = (cropData.growTime * 60000)
+              / (weatherMultiplier * toolMultiplier * fertilizerBoost * seasonMultiplier);
 
-          if (now - plot.plantTime >= adjustedGrowTime && !plot.ready) {
-            addNotification(`${cropData.emoji} ${cropData.name} 成熟了！`, { type: 'success' });
-            return { ...plot, ready: true };
+            if (now - plot.plantTime >= adjustedGrowTime && !plot.ready) {
+              addNotification(`${cropData.emoji} ${cropData.name} 成熟了！`, { type: 'success' });
+              return { ...plot, ready: true };
+            }
           }
-        }
-        return plot;
-      }));
+          return plot;
+        });
+        stateRef.current.farm = updatedFarm;
+        return updatedFarm;
+      });
     }, 5000);
 
     return () => clearInterval(growTimer);
