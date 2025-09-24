@@ -1,10 +1,35 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { Sprout, Coins, ShoppingCart, Heart, Home, Sun, Moon, Zap, Droplets, Hammer, Building, Star, Save, Trophy, Settings, MessageCircle, Target, UtensilsCrossed } from 'lucide-react';
-import { CROPS, ANIMALS, BUILDINGS, TOOLS, ACHIEVEMENTS, NPCS, WEATHER_TYPES, SEASONS } from './game/data/GameCatalog';
+import { Sprout, Coins, ShoppingCart, Heart, Home, Sun, Moon, Zap, Droplets, Hammer, Building, Star, Save, Trophy, Settings, MessageCircle, Target, UtensilsCrossed, TrendingUp, TrendingDown, Clock3, Boxes } from 'lucide-react';
+import { CROPS, ANIMALS, BUILDINGS, TOOLS, ACHIEVEMENTS, NPCS, WEATHER_TYPES, SEASONS, FARM_SUPPLIES, ANIMAL_PRODUCTS } from './game/data/GameCatalog';
 import { GameFormatter } from './game/utils/GameFormatter';
-import { GameEngine } from './game/engine/GameEngine';
+import { GameEngine, getFarmExpansionCost, getAnimalHousingExpansionCost, BASE_FARM_PLOTS, MAX_FARM_PLOTS, BASE_ANIMAL_CAPACITY, MAX_ANIMAL_CAPACITY, FARM_EXPANSION_BATCH, ANIMAL_CAPACITY_STEP, BUILDING_UPGRADES } from './game/engine/GameEngine';
 import { SaveManager } from './game/engine/SaveManager';
 import { NotificationCenter } from './game/engine/NotificationCenter';
+import { createInitialInventory, INVENTORY_METADATA, INVENTORY_ORDER } from './game/state/InventoryState';
+import { QuestManager } from './game/quests/QuestManager';
+
+const ANIMAL_ECOLOGY_CONFIG = {
+  dailyHungerLoss: 28,
+  hungerWarningThreshold: 35,
+  severeHungerThreshold: 12,
+  happinessDecay: 8,
+  severeHungerPenalty: 25,
+  moderateHungerPenalty: 10,
+  sicknessPenalty: 15,
+  sicknessTriggerThreshold: 25,
+  illnessDeathDays: 3,
+  illnessDeathChance: 0.35,
+  overcrowdThreshold: 0.85,
+  overcrowdPenalty: 12,
+  breeding: {
+    wellFedThreshold: 70,
+    happyThreshold: 70,
+    baseChance: 0.1,
+    happinessWeight: 0.003,
+    hungerWeight: 0.0025,
+    maxPairsPerType: 3,
+  },
+};
 
 const FarmGame = () => {
   // 基本狀態
@@ -19,32 +44,46 @@ const FarmGame = () => {
   const [weatherDuration, setWeatherDuration] = useState(5);
   
   // 遊戲數據
-  const [inventory, setInventory] = useState({
-    carrot: 0, corn: 0, tomato: 0, wheat: 0, potato: 0, strawberry: 0
-  });
+  const [inventory, setInventory] = useState(() => createInitialInventory());
   
   const [farm, setFarm] = useState(
-    Array(25).fill().map((_, i) => ({
+    Array(BASE_FARM_PLOTS).fill().map((_, i) => ({
       id: i,
       crop: null,
       plantTime: null,
       watered: false,
       fertilized: false,
       greenhouse: false,
-      pest: false
+      pest: false,
+      pestDays: 0,
+      ready: false,
     }))
   );
-  
+
+  const [farmSupplies, setFarmSupplies] = useState({
+    fertilizer: 0,
+    pesticide: 0,
+    medicine: 0,
+  });
+
+  const [questLog, setQuestLog] = useState({});
+  const [dynamicQuests, setDynamicQuests] = useState({});
+
   const [animals, setAnimals] = useState([]);
+  const [animalCapacity, setAnimalCapacity] = useState(BASE_ANIMAL_CAPACITY);
   const [buildings, setBuildings] = useState({});
   const [tools, setTools] = useState('basic');
-  
+  const [ownedTools, setOwnedTools] = useState(() => ['basic']);
+  const [toolLevels, setToolLevels] = useState({});
+
   // UI狀態
   const [selectedSeed, setSelectedSeed] = useState(null);
+  const [selectedSupply, setSelectedSupply] = useState(null);
   const [showShop, setShowShop] = useState(false);
   const [showAnimalShop, setShowAnimalShop] = useState(false);
   const [showBuildingShop, setShowBuildingShop] = useState(false);
   const [showToolShop, setShowToolShop] = useState(false);
+  const [showSupplyShop, setShowSupplyShop] = useState(false);
   const [showAchievements, setShowAchievements] = useState(false);
   const [showNPCDialog, setShowNPCDialog] = useState(false);
   const [currentNPC, setCurrentNPC] = useState(null);
@@ -53,6 +92,12 @@ const FarmGame = () => {
   const [showLoadMenu, setShowLoadMenu] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
   const [notifications, setNotifications] = useState([]);
+  const [pendingGreenhousePlacement, setPendingGreenhousePlacement] = useState(false);
+  const [marketView, setMarketView] = useState('summary');
+  const [marketListSort, setMarketListSort] = useState('price');
+  const [inventorySortMode, setInventorySortMode] = useState('value');
+
+  const stateRef = useRef({});
 
   const notificationCenter = useMemo(() => new NotificationCenter(setNotifications), []);
   const addNotification = useCallback((message, options) => {
@@ -61,11 +106,63 @@ const FarmGame = () => {
   const dismissNotification = useCallback((id) => {
     notificationCenter.dismiss(id);
   }, [notificationCenter]);
+
+  const questManager = useMemo(() => new QuestManager({
+    stateRef,
+    setQuestLog,
+    setDynamicQuests,
+    setInventory,
+    setMoney,
+    notifier: addNotification,
+  }), [stateRef, setQuestLog, setDynamicQuests, setInventory, setMoney, addNotification]);
+
+  const questDefinitions = useMemo(
+    () => questManager.buildQuestDefinitions(dynamicQuests),
+    [questManager, dynamicQuests],
+  );
+
+  useEffect(() => {
+    questManager.refreshDaily(day);
+  }, [questManager, day]);
+
+  const recordQuestEvent = useCallback((event) => {
+    questManager.recordEvent(event, questDefinitions);
+  }, [questManager, questDefinitions]);
+
+  const farmSize = Array.isArray(farm) ? farm.length : 0;
+  const nextFarmExpansionCost = useMemo(() => (
+    farmSize < MAX_FARM_PLOTS
+      ? getFarmExpansionCost(farmSize)
+      : null
+  ), [farmSize]);
+
+  const nextAnimalExpansionCost = useMemo(() => (
+    animalCapacity < MAX_ANIMAL_CAPACITY
+      ? getAnimalHousingExpansionCost(animalCapacity)
+      : null
+  ), [animalCapacity]);
+
+  const effectiveToolStats = useMemo(() => {
+    const baseTool = TOOLS[tools] || TOOLS.basic;
+    const level = toolLevels?.[tools] ?? 0;
+    const speedBoost = (baseTool.speedBoost || 1) + (baseTool.speedUpgrade || 0) * level;
+    const energyReduction = (baseTool.energyReduction || 0) + (baseTool.energyUpgrade || 0) * level;
+
+    return {
+      base: baseTool,
+      level,
+      displayLevel: level + 1,
+      speedBoost,
+      energyReduction,
+    };
+  }, [tools, toolLevels]);
   
   // 新功能狀態
   const [completedAchievements, setCompletedAchievements] = useState(new Set());
   const [aiAdvice, setAiAdvice] = useState('');
   const [marketPrices, setMarketPrices] = useState({});
+  const [previousMarketPrices, setPreviousMarketPrices] = useState({});
+  const [marketUpdateTime, setMarketUpdateTime] = useState(null);
   const [dailyStats, setDailyStats] = useState([]);
   const [automation, setAutomation] = useState({ autoWater: false, autoHarvest: false });
   
@@ -80,8 +177,6 @@ const FarmGame = () => {
   const [saveData, setSaveData] = useState('');
   const [loadData, setLoadData] = useState('');
 
-  const stateRef = useRef({});
-
   stateRef.current = {
     money,
     energy,
@@ -94,16 +189,29 @@ const FarmGame = () => {
     weatherDuration,
     inventory,
     farm,
+    farmSupplies,
+    questLog,
     animals,
+    animalCapacity,
     buildings,
     tools,
+    ownedTools,
+    toolLevels,
     completedAchievements,
     dailyStats,
     automation,
     marketPrices,
+    previousMarketPrices,
+    marketUpdateTime,
     saveSlots,
     selectedSeed,
+    selectedSupply,
     loadData,
+    pendingGreenhousePlacement,
+    marketView,
+    marketListSort,
+    inventorySortMode,
+    dynamicQuests,
   };
 
   const saveManager = useMemo(() => new SaveManager({
@@ -121,17 +229,29 @@ const FarmGame = () => {
       setInventory,
       setFarm,
       setAnimals,
+      setAnimalCapacity,
       setBuildings,
       setTools,
+      setOwnedTools,
+      setToolLevels,
+      setFarmSupplies,
+      setQuestLog,
       setCompletedAchievements,
       setDailyStats,
       setAutomation,
       setMarketPrices,
+      setPreviousMarketPrices,
+      setMarketUpdateTime,
       setSaveSlots,
       setShowSaveMenu,
       setShowLoadMenu,
       setLoadData,
       setSaveData,
+      setSelectedSeed,
+      setSelectedSupply,
+      setShowSupplyShop,
+      setPendingGreenhousePlacement,
+      setDynamicQuests,
     },
     notifier: addNotification,
   }), [addNotification]);
@@ -141,20 +261,274 @@ const FarmGame = () => {
     setters: {
       setMoney,
       setSelectedSeed,
+      setSelectedSupply,
       setShowShop,
+      setShowSupplyShop,
       setFarm,
       setEnergy,
       setExperience,
       setInventory,
+      setFarmSupplies,
       setAnimals,
+      setAnimalCapacity,
       setShowAnimalShop,
       setBuildings,
       setShowBuildingShop,
       setTools,
       setShowToolShop,
+      setOwnedTools,
+      setToolLevels,
+      setPendingGreenhousePlacement,
+      recordQuestEvent,
     },
     notifier: addNotification,
-  }), [addNotification]);
+  }), [stateRef, addNotification, recordQuestEvent]);
+
+  const sprinklerLevel = useMemo(
+    () => gameEngine.getBuildingLevel(buildings, 'sprinkler'),
+    [gameEngine, buildings],
+  );
+  const sprinklerCoverage = useMemo(
+    () => gameEngine.getSprinklerCoverage(buildings),
+    [gameEngine, buildings],
+  );
+  const nextSprinklerUpgrade = useMemo(() => {
+    const upgrades = BUILDING_UPGRADES.sprinkler || [];
+    return upgrades.find(entry => entry.level === sprinklerLevel + 1) || null;
+  }, [sprinklerLevel]);
+
+  const acceptQuest = useCallback((questId) => {
+    questManager.acceptQuest(questId, questDefinitions, questLog, day);
+  }, [questManager, questDefinitions, questLog, day]);
+
+  const deliverQuest = useCallback((questId) => {
+    questManager.deliverQuest(questId, questDefinitions, questLog, inventory, day);
+  }, [questManager, questDefinitions, questLog, inventory, day]);
+
+  const claimQuestReward = useCallback((questId) => {
+    questManager.claimQuestReward(questId, questDefinitions, questLog, day);
+  }, [questManager, questDefinitions, questLog, day]);
+
+  const activeQuests = useMemo(() => {
+    const list = questManager.getActiveQuests(questDefinitions, questLog, inventory);
+    return list.sort((a, b) => {
+      if (a.ready === b.ready) {
+        return 0;
+      }
+      return a.ready ? -1 : 1;
+    });
+  }, [questManager, questDefinitions, questLog, inventory]);
+
+  const availableDynamicQuests = useMemo(() => {
+    if (!dynamicQuests) {
+      return [];
+    }
+
+    return Object.entries(dynamicQuests)
+      .map(([id, quest]) => {
+        const entry = questLog?.[id];
+        if (entry && (entry.status === 'accepted' || entry.status === 'ready')) {
+          return null;
+        }
+        return { id, quest };
+      })
+      .filter(Boolean);
+  }, [dynamicQuests, questLog]);
+
+  const marketInsights = useMemo(() => {
+    const entries = Object.entries(CROPS).map(([key, crop]) => {
+      const price = marketPrices?.[key] ?? crop.sellPrice;
+      const basePrice = crop.sellPrice;
+      const previousPrice = previousMarketPrices?.[key];
+      const changeFromBase = price - basePrice;
+      const percentFromBase = basePrice ? (changeFromBase / basePrice) * 100 : 0;
+      const changeFromPrevious = typeof previousPrice === 'number' ? price - previousPrice : null;
+      const percentFromPrevious =
+        typeof previousPrice === 'number' && previousPrice !== 0
+          ? (changeFromPrevious / previousPrice) * 100
+          : null;
+
+      return {
+        key,
+        name: crop.name,
+        emoji: crop.emoji,
+        price,
+        basePrice,
+        changeFromBase,
+        percentFromBase,
+        previousPrice,
+        changeFromPrevious,
+        percentFromPrevious,
+      };
+    });
+
+    const sortedByPremium = [...entries].sort((a, b) => b.percentFromBase - a.percentFromBase);
+    const risers = entries
+      .filter(entry => (entry.changeFromPrevious ?? 0) > 0)
+      .sort((a, b) => (b.changeFromPrevious ?? 0) - (a.changeFromPrevious ?? 0))
+      .slice(0, 3);
+    const fallers = entries
+      .filter(entry => (entry.changeFromPrevious ?? 0) < 0)
+      .sort((a, b) => (a.changeFromPrevious ?? 0) - (b.changeFromPrevious ?? 0))
+      .slice(0, 3);
+    const averageIndex = entries.length > 0
+      ? entries.reduce((sum, entry) => sum + (entry.basePrice ? (entry.price / entry.basePrice) : 1), 0) / entries.length
+      : 1;
+    const highestPrice = entries.reduce((max, entry) => Math.max(max, entry.price), 0);
+
+    return {
+      entries,
+      sortedByPremium,
+      risers,
+      fallers,
+      averageIndex,
+      highestPrice,
+    };
+  }, [marketPrices, previousMarketPrices]);
+
+  const inventoryInsights = useMemo(() => {
+    const sourceInventory = inventory || {};
+    const items = [];
+    let totalCount = 0;
+    let totalValue = 0;
+
+    Object.entries(sourceInventory).forEach(([key, count]) => {
+      if (!count) return;
+      const metadata = INVENTORY_METADATA[key];
+      if (!metadata) return;
+
+      const totalItemValue = gameEngine.getInventorySaleValue(key, count);
+      const unitValue = count > 0 ? Math.max(0, Math.round(totalItemValue / count)) : 0;
+
+      totalCount += count;
+      totalValue += totalItemValue;
+
+      items.push({
+        key,
+        ...metadata,
+        count,
+        unitValue,
+        totalValue: totalItemValue,
+        canSell: totalItemValue > 0,
+      });
+    });
+
+    const sortedItems = [...items];
+    sortedItems.sort((a, b) => {
+      if (inventorySortMode === 'count') {
+        if (b.count === a.count) {
+          return b.totalValue - a.totalValue;
+        }
+        return b.count - a.count;
+      }
+
+      if (b.totalValue === a.totalValue) {
+        return b.count - a.count;
+      }
+      return b.totalValue - a.totalValue;
+    });
+
+    const safeTotalValue = totalValue;
+    const safeTotalCount = totalCount;
+    sortedItems.forEach(item => {
+      if (safeTotalValue > 0) {
+        item.share = Math.round((item.totalValue / safeTotalValue) * 100);
+      } else if (safeTotalCount > 0) {
+        item.share = Math.round((item.count / safeTotalCount) * 100);
+      } else {
+        item.share = 0;
+      }
+    });
+
+    return {
+      items: sortedItems,
+      totalCount: safeTotalCount,
+      totalValue: Math.round(safeTotalValue),
+    };
+  }, [inventory, gameEngine, animals, buildings, marketPrices, inventorySortMode]);
+
+  const seedStorage = useMemo(() => {
+    const sourceInventory = inventory || {};
+    if (!sourceInventory) {
+      return [];
+    }
+
+    return Object.entries(sourceInventory)
+      .map(([key, count]) => {
+        if (!key.startsWith('seed_')) {
+          return null;
+        }
+        const supplyCount = farmSupplies?.[key] || 0;
+        const totalCount = Math.max(count || 0, supplyCount || 0);
+        if (totalCount <= 0) {
+          return null;
+        }
+        const cropKey = key.replace('seed_', '');
+        const crop = CROPS[cropKey];
+        return {
+          key,
+          cropKey,
+          count: totalCount,
+          name: crop?.name || cropKey,
+          emoji: crop?.emoji || '🌱',
+        };
+      })
+      .filter(Boolean)
+      .sort((a, b) => {
+        if (b.count === a.count) {
+          return a.name.localeCompare(b.name, 'zh-TW');
+        }
+        return b.count - a.count;
+      });
+  }, [inventory, farmSupplies]);
+
+  const hasAnyBaseSupply = useMemo(
+    () => Object.keys(FARM_SUPPLIES).some(key => (farmSupplies?.[key] || 0) > 0),
+    [farmSupplies],
+  );
+
+  const buildingEntries = useMemo(() => {
+    if (!buildings) {
+      return [];
+    }
+
+    return Object.entries(buildings)
+      .filter(([key, value]) => {
+        if (!BUILDINGS[key]) {
+          return false;
+        }
+
+        if (typeof value === 'number') {
+          return value > 0;
+        }
+
+        return Boolean(value);
+      })
+      .map(([key, value]) => ({
+        key,
+        value,
+        meta: BUILDINGS[key],
+        count: typeof value === 'number' ? value : null,
+      }));
+  }, [buildings]);
+
+  const sortedMarketEntries = useMemo(() => {
+    const baseEntries = marketInsights.entries ? [...marketInsights.entries] : [];
+
+    switch (marketListSort) {
+      case 'premium':
+        baseEntries.sort((a, b) => (b.percentFromBase ?? 0) - (a.percentFromBase ?? 0));
+        break;
+      case 'change':
+        baseEntries.sort((a, b) => (b.changeFromPrevious ?? 0) - (a.changeFromPrevious ?? 0));
+        break;
+      default:
+        baseEntries.sort((a, b) => b.price - a.price);
+        break;
+    }
+
+    return baseEntries;
+  }, [marketInsights.entries, marketListSort]);
 
   const saveToSlot = useCallback((slotName) => {
     saveManager.saveToSlot(slotName);
@@ -189,6 +563,7 @@ const FarmGame = () => {
     const generateAdvice = () => {
       const safeAnimals = Array.isArray(animals) ? animals : [];
       const safeInventory = inventory || {};
+      const safeFarm = Array.isArray(farm) ? farm : [];
 
       const advices = [
         weather === 'sunny' ? '☀️ 晴天適合種植番茄和草莓！' : '',
@@ -197,7 +572,10 @@ const FarmGame = () => {
         money > 2000 ? '💰 資金充足，考慮建造新建築！' : '',
         safeAnimals.some(a => (a.happiness ?? 50) < 40) ? '🐾 有動物心情低落，餵食或陪伴牠們吧！' : '',
         safeAnimals.some(a => (a.hunger ?? 60) < 35) ? '🍽️ 有動物快餓扁了，趕快餵牠們！' : '',
+        safeAnimals.some(a => a.sick) ? '🤒 有動物生病了，使用營養劑能幫助牠們恢復。' : '',
+        safeFarm.some(plot => plot.pest) ? '🐛 有作物遭害蟲啃食，記得噴灑驅蟲劑！' : '',
         Object.values(safeInventory).some(count => count > 10) ? '📦 庫存充足，可以考慮出售！' : '',
+        Object.keys(ANIMAL_PRODUCTS).some(key => (safeInventory[key] || 0) > 0) ? '🥚 動物產物已入庫，記得賣出換現金！' : '',
       ].filter(Boolean);
 
       if (advices.length > 0) {
@@ -210,24 +588,27 @@ const FarmGame = () => {
     const timer = setInterval(generateAdvice, 60000);
     generateAdvice();
     return () => clearInterval(timer);
-  }, [weather, energy, money, animals, inventory]);
+  }, [weather, energy, money, animals, inventory, farm]);
 
   // 動態市場價格
   useEffect(() => {
     const updatePrices = () => {
+      const previousSnapshot = stateRef.current.marketPrices || {};
       const newPrices = {};
       Object.keys(CROPS).forEach(crop => {
         const basePrice = CROPS[crop].sellPrice;
         const fluctuation = 0.8 + Math.random() * 0.4;
         newPrices[crop] = Math.floor(basePrice * fluctuation);
       });
+      setPreviousMarketPrices(previousSnapshot);
       setMarketPrices(newPrices);
+      setMarketUpdateTime(Date.now());
     };
-    
+
     updatePrices();
     const timer = setInterval(updatePrices, 120000);
     return () => clearInterval(timer);
-  }, []);
+  }, [stateRef]);
 
   // 成就系統
   useEffect(() => {
@@ -285,6 +666,7 @@ const FarmGame = () => {
           setEnergy(100);
 
           // 動物每日狀態與收入結算
+          const producedGoods = {};
           setAnimals(prevAnimals => {
             if (!Array.isArray(prevAnimals) || prevAnimals.length === 0) {
               return prevAnimals;
@@ -292,39 +674,200 @@ const FarmGame = () => {
 
             let totalIncome = 0;
             const hungryNames = [];
+            const starvationLosses = [];
+            const illnessLosses = [];
+            const newlySick = [];
+            const sickAnimals = [];
+            const outbreakVictims = [];
+            const overcrowdAlerts = [];
+            const newbornAnimals = [];
+            const breedingPools = {};
+            const capacityLimit = Math.max(animalCapacity || BASE_ANIMAL_CAPACITY, BASE_ANIMAL_CAPACITY);
 
-            const updatedAnimals = prevAnimals.map(animal => {
+            const typeCounts = prevAnimals.reduce((counts, current) => {
+              const type = current.type;
+              counts[type] = (counts[type] || 0) + 1;
+              return counts;
+            }, {});
+
+            const updatedAnimals = prevAnimals.reduce((list, animal) => {
               const animalData = ANIMALS[animal.type];
               const shelterKey = animalData.shelter;
-              const hasShelter = buildings?.[shelterKey];
-              const boost = hasShelter ? BUILDINGS[shelterKey].boost : 1;
+              const boost = gameEngine.getShelterBoost(buildings, shelterKey);
 
               const previousHunger = animal.hunger ?? 60;
-              const hunger = Math.max(0, previousHunger - 30);
+              const hunger = Math.max(0, previousHunger - ANIMAL_ECOLOGY_CONFIG.dailyHungerLoss);
 
-              let happiness = Math.max(0, (animal.happiness ?? animalData.happiness) - 10);
-              let canProduce = happiness > 20 && hunger > 30;
-
-              if (hunger <= 10) {
-                hungryNames.push(`${animal.name}（急需餵食）`);
-                happiness = Math.max(0, happiness - 25);
-                canProduce = false;
-              } else if (hunger <= 30) {
-                hungryNames.push(animal.name);
-                happiness = Math.max(0, happiness - 10);
-                canProduce = happiness > 25;
+              if (hunger <= 0) {
+                starvationLosses.push(animal.name);
+                return list;
               }
 
-              const income = canProduce
-                ? Math.floor(animalData.income * boost * (happiness / 100))
-                : 0;
+              const baseHappiness = animal.happiness ?? animalData.happiness;
+              let happiness = Math.max(0, baseHappiness - ANIMAL_ECOLOGY_CONFIG.happinessDecay);
+              let sick = Boolean(animal.sick);
+              const wasSick = Boolean(animal.sick);
+              let sicknessDays = animal.sicknessDays ?? (wasSick ? 1 : 0);
+              let canProduce = happiness > 25 && hunger > ANIMAL_ECOLOGY_CONFIG.hungerWarningThreshold;
+
+              if (hunger <= ANIMAL_ECOLOGY_CONFIG.severeHungerThreshold) {
+                hungryNames.push(`${animal.name}（急需餵食）`);
+                happiness = Math.max(0, happiness - ANIMAL_ECOLOGY_CONFIG.severeHungerPenalty);
+                canProduce = false;
+              } else if (hunger <= ANIMAL_ECOLOGY_CONFIG.hungerWarningThreshold) {
+                hungryNames.push(animal.name);
+                happiness = Math.max(0, happiness - ANIMAL_ECOLOGY_CONFIG.moderateHungerPenalty);
+                canProduce = happiness > 30;
+              }
+
+              if (!sick && (hunger <= ANIMAL_ECOLOGY_CONFIG.sicknessTriggerThreshold || happiness <= ANIMAL_ECOLOGY_CONFIG.sicknessTriggerThreshold)) {
+                sick = true;
+                newlySick.push(animal.name);
+              }
+
+              if (sick) {
+                sicknessDays += 1;
+                happiness = Math.max(0, happiness - ANIMAL_ECOLOGY_CONFIG.sicknessPenalty);
+                canProduce = false;
+                sickAnimals.push(animal.name);
+              } else {
+                sicknessDays = 0;
+              }
+
+              if (sick && sicknessDays >= ANIMAL_ECOLOGY_CONFIG.illnessDeathDays && Math.random() < ANIMAL_ECOLOGY_CONFIG.illnessDeathChance) {
+                illnessLosses.push(animal.name);
+                return list;
+              }
+
+              let income = 0;
+              let productReady = Math.max(0, Math.floor(animal.productReady || 0));
+              if (canProduce) {
+                if (animalData.product && ANIMAL_PRODUCTS[animalData.product]) {
+                  const productKey = animalData.product;
+                  const baseUnits = 1;
+                  const units = Math.max(1, Math.round(baseUnits * boost * (happiness / 100)));
+                  productReady += units;
+                  producedGoods[productKey] = (producedGoods[productKey] || 0) + units;
+                } else {
+                  income = Math.floor((animalData.income || 0) * boost * (happiness / 100));
+                }
+              }
               totalIncome += income;
 
-              return {
+              if (!animalData.product) {
+                productReady = 0;
+              }
+
+              const canBreed = !sick
+                && hunger >= ANIMAL_ECOLOGY_CONFIG.breeding.wellFedThreshold
+                && happiness >= ANIMAL_ECOLOGY_CONFIG.breeding.happyThreshold;
+              if (canBreed) {
+                if (!breedingPools[animal.type]) {
+                  breedingPools[animal.type] = [];
+                }
+                breedingPools[animal.type].push({ happiness, hunger });
+              }
+
+              list.push({
                 ...animal,
                 happiness,
                 hunger,
-              };
+                sick,
+                sicknessDays,
+                productReady,
+              });
+              return list;
+            }, []);
+
+            let processedAnimals = updatedAnimals;
+
+            if (processedAnimals.length > 0 && Math.random() < 0.08) {
+              const healthyCandidates = processedAnimals.filter(candidate => !candidate.sick);
+              if (healthyCandidates.length > 0) {
+                const victimCount = Math.max(1, Math.ceil(healthyCandidates.length * 0.3));
+                const selectedIds = new Set();
+                while (selectedIds.size < Math.min(victimCount, healthyCandidates.length)) {
+                  const target = healthyCandidates[Math.floor(Math.random() * healthyCandidates.length)];
+                  selectedIds.add(target.id);
+                }
+
+                processedAnimals = processedAnimals.map(state => {
+                  if (selectedIds.has(state.id)) {
+                    const animalData = ANIMALS[state.type];
+                    const baseHappiness = state.happiness ?? animalData.happiness ?? 40;
+                    const baseHunger = state.hunger ?? 60;
+                    const adjusted = {
+                      ...state,
+                      sick: true,
+                      sicknessDays: (state.sicknessDays ?? 0) + 1,
+                      happiness: Math.max(0, baseHappiness - 20),
+                      hunger: Math.max(0, baseHunger - 25),
+                    };
+                    outbreakVictims.push(adjusted.name);
+                    newlySick.push(adjusted.name);
+                    sickAnimals.push(adjusted.name);
+                    return adjusted;
+                  }
+                  return state;
+                });
+              }
+            }
+
+            const occupancyRatio = capacityLimit > 0 ? processedAnimals.length / capacityLimit : 1;
+            if (occupancyRatio > ANIMAL_ECOLOGY_CONFIG.overcrowdThreshold) {
+              const overflow = Math.max(0, occupancyRatio - ANIMAL_ECOLOGY_CONFIG.overcrowdThreshold);
+              const penalty = Math.max(2, Math.ceil(ANIMAL_ECOLOGY_CONFIG.overcrowdPenalty * overflow / (1 - ANIMAL_ECOLOGY_CONFIG.overcrowdThreshold)));
+              processedAnimals = processedAnimals.map(state => {
+                const animalData = ANIMALS[state.type];
+                const baseHappiness = state.happiness ?? animalData.happiness ?? 40;
+                const reduced = Math.max(0, baseHappiness - penalty);
+                let nextState = { ...state, happiness: reduced };
+                if (!nextState.sick && reduced <= ANIMAL_ECOLOGY_CONFIG.sicknessTriggerThreshold) {
+                  nextState = { ...nextState, sick: true, sicknessDays: (nextState.sicknessDays ?? 0) + 1 };
+                  newlySick.push(nextState.name);
+                  sickAnimals.push(nextState.name);
+                }
+                return nextState;
+              });
+              overcrowdAlerts.push('overcrowded');
+            }
+
+            let availableSlots = Math.max(0, capacityLimit - processedAnimals.length);
+            Object.entries(breedingPools).forEach(([type, candidates]) => {
+              if (availableSlots <= 0) {
+                return;
+              }
+              if (candidates.length < 2) {
+                return;
+              }
+
+              const averageHappiness = candidates.reduce((sum, entry) => sum + entry.happiness, 0) / candidates.length;
+              const averageHunger = candidates.reduce((sum, entry) => sum + entry.hunger, 0) / candidates.length;
+              const pairCount = Math.min(Math.floor(candidates.length / 2), ANIMAL_ECOLOGY_CONFIG.breeding.maxPairsPerType);
+              const chance = ANIMAL_ECOLOGY_CONFIG.breeding.baseChance
+                + Math.max(0, (averageHappiness - ANIMAL_ECOLOGY_CONFIG.breeding.happyThreshold) * ANIMAL_ECOLOGY_CONFIG.breeding.happinessWeight)
+                + Math.max(0, (averageHunger - ANIMAL_ECOLOGY_CONFIG.breeding.wellFedThreshold) * ANIMAL_ECOLOGY_CONFIG.breeding.hungerWeight);
+
+              for (let attempt = 0; attempt < pairCount && availableSlots > 0; attempt += 1) {
+                if (Math.random() < chance) {
+                  const data = ANIMALS[type];
+                  typeCounts[type] = (typeCounts[type] || 0) + 1;
+                  const babyIndex = typeCounts[type];
+                  const babyName = `${data.name}寶寶${babyIndex}`;
+                  newbornAnimals.push({
+                    id: Date.now() + newbornAnimals.length + Math.floor(Math.random() * 1000),
+                    type,
+                    happiness: data.happiness,
+                    hunger: 68,
+                    lastFed: Date.now(),
+                    sick: false,
+                    sicknessDays: 0,
+                    name: babyName,
+                    productReady: 0,
+                  });
+                  availableSlots -= 1;
+                }
+              }
             });
 
             if (totalIncome > 0) {
@@ -337,8 +880,229 @@ const FarmGame = () => {
               addNotification(`🍽️ ${names} 肚子餓了，記得餵食！`, { type: 'warning' });
             }
 
-            return updatedAnimals;
+            if (starvationLosses.length > 0) {
+              const names = Array.from(new Set(starvationLosses)).join('、');
+              addNotification(`💀 ${names} 因為長期挨餓離開了農場……`, { type: 'error' });
+            }
+
+            if (illnessLosses.length > 0) {
+              const names = Array.from(new Set(illnessLosses)).join('、');
+              addNotification(`☠️ ${names} 因病過世，務必照顧好其他動物的健康！`, { type: 'error' });
+            }
+
+            if (newlySick.length > 0) {
+              const names = Array.from(new Set(newlySick)).join('、');
+              addNotification(`🤒 ${names} 身體不適，需要營養劑治療！`, { type: 'error' });
+            }
+
+            if (outbreakVictims.length > 0) {
+              const names = Array.from(new Set(outbreakVictims)).join('、');
+              addNotification(`☠️ 農場爆發傳染病！${names} 情況危急，務必立即治療！`, { type: 'error' });
+            }
+
+            const ongoingSick = Array.from(new Set(sickAnimals.filter(name => !newlySick.includes(name))));
+            if (ongoingSick.length > 0) {
+              addNotification(`💊 ${ongoingSick.join('、')} 仍在療養中，記得使用營養劑。`, { type: 'warning' });
+            }
+
+            if (overcrowdAlerts.length > 0) {
+              addNotification('🐏 動物棲位過於擁擠，建議擴建欄舍或調整飼養量！', { type: 'warning' });
+            }
+
+            if (newbornAnimals.length > 0) {
+              const names = newbornAnimals.map(animal => animal.name).join('、');
+              addNotification(`🐣 ${names} 出生了，農場又更熱鬧了！`, { type: 'success' });
+            }
+
+            return [...processedAnimals, ...newbornAnimals];
           });
+
+          if (Object.keys(producedGoods).length > 0) {
+            const produceSummary = Object.entries(producedGoods).map(([productKey, amount]) => {
+              const product = ANIMAL_PRODUCTS[productKey];
+              const label = product ? `${product.emoji} ${product.name}` : productKey;
+              return `${label} x${amount}`;
+            });
+
+            addNotification(`${produceSummary.join('、')} 已可收集，記得到動物欄點擊「收集」！`, { type: 'info' });
+          }
+
+          const infestedCrops = [];
+          const destroyedCrops = [];
+          const stormDamaged = [];
+          const blightInfected = [];
+          const autoWatered = new Set();
+          const uncoveredByCoverage = new Set();
+          const sprinklerLevel = gameEngine.getBuildingLevel(buildings, 'sprinkler');
+          const sprinklerCoverage = gameEngine.getSprinklerCoverage(buildings);
+          let autoWaterCapacityUsed = 0;
+          setFarm(prevFarm => {
+            let changed = false;
+            const nextFarm = prevFarm.map(plot => {
+              let updatedPlot = plot;
+
+              if (plot.crop) {
+                const originalCrop = CROPS[plot.crop];
+                if (!plot.ready && !plot.pest) {
+                  const pestChance = plot.fertilized ? 0.05 : 0.12;
+                  if (Math.random() < pestChance) {
+                    if (originalCrop) {
+                      infestedCrops.push(originalCrop.name);
+                    }
+                    updatedPlot = { ...plot, pest: true, pestDays: 1 };
+                  }
+                }
+
+                if (updatedPlot.pest) {
+                  const currentDays = updatedPlot.pestDays ?? 0;
+                  const nextDays = currentDays + (plot.pest ? 1 : 0);
+                  if (!updatedPlot.ready && nextDays >= 3) {
+                    const damagedCrop = updatedPlot.crop ? CROPS[updatedPlot.crop] : null;
+                    if (damagedCrop) {
+                      destroyedCrops.push(damagedCrop.name);
+                    }
+                    updatedPlot = {
+                      ...updatedPlot,
+                      crop: null,
+                      plantTime: null,
+                      watered: false,
+                      fertilized: false,
+                      pest: false,
+                      pestDays: 0,
+                      ready: false,
+                    };
+                  } else if (nextDays !== currentDays) {
+                    updatedPlot = { ...updatedPlot, pestDays: nextDays };
+                  }
+                } else if (updatedPlot.pestDays) {
+                  updatedPlot = { ...updatedPlot, pestDays: 0 };
+                }
+
+                const cropInfo = updatedPlot.crop ? CROPS[updatedPlot.crop] : null;
+
+                if (sprinklerLevel > 0 && sprinklerCoverage > 0 && updatedPlot.crop && !updatedPlot.ready && !updatedPlot.watered) {
+                  if (autoWaterCapacityUsed < sprinklerCoverage) {
+                    autoWaterCapacityUsed += 1;
+                    updatedPlot = { ...updatedPlot, watered: true };
+                    if (cropInfo) {
+                      autoWatered.add(cropInfo.name);
+                    }
+                  } else if (cropInfo) {
+                    uncoveredByCoverage.add(cropInfo.name);
+                  }
+                }
+              } else {
+                if (updatedPlot.fertilized || updatedPlot.pest || (updatedPlot.pestDays ?? 0) > 0 || updatedPlot.ready) {
+                  updatedPlot = {
+                    ...updatedPlot,
+                    fertilized: false,
+                    pest: false,
+                    pestDays: 0,
+                    ready: false,
+                  };
+                }
+              }
+
+              if (updatedPlot !== plot) {
+                changed = true;
+              }
+
+              return updatedPlot;
+            });
+
+            let processedFarm = nextFarm;
+
+            const vulnerableForStorm = processedFarm.filter(plot => plot.crop && !plot.greenhouse);
+            if (vulnerableForStorm.length > 0 && Math.random() < 0.12) {
+              const hits = Math.max(1, Math.ceil(vulnerableForStorm.length * 0.25));
+              const selectedIds = new Set();
+              while (selectedIds.size < Math.min(hits, vulnerableForStorm.length)) {
+                const target = vulnerableForStorm[Math.floor(Math.random() * vulnerableForStorm.length)];
+                selectedIds.add(target.id);
+              }
+
+              processedFarm = processedFarm.map(plot => {
+                if (selectedIds.has(plot.id)) {
+                  const cropInfo = plot.crop ? CROPS[plot.crop] : null;
+                  if (cropInfo) {
+                    stormDamaged.push(cropInfo.name);
+                  }
+                  changed = true;
+                  return {
+                    ...plot,
+                    crop: null,
+                    plantTime: null,
+                    watered: false,
+                    fertilized: false,
+                    pest: false,
+                    pestDays: 0,
+                    ready: false,
+                  };
+                }
+                return plot;
+              });
+            }
+
+            const vulnerableForBlight = processedFarm.filter(plot => plot.crop && !plot.greenhouse && !plot.ready && !plot.pest);
+            if (vulnerableForBlight.length > 0 && Math.random() < 0.09) {
+              const hits = Math.max(1, Math.ceil(vulnerableForBlight.length * 0.3));
+              const selectedIds = new Set();
+              while (selectedIds.size < Math.min(hits, vulnerableForBlight.length)) {
+                const target = vulnerableForBlight[Math.floor(Math.random() * vulnerableForBlight.length)];
+                selectedIds.add(target.id);
+              }
+
+              processedFarm = processedFarm.map(plot => {
+                if (selectedIds.has(plot.id)) {
+                  const cropInfo = plot.crop ? CROPS[plot.crop] : null;
+                  if (cropInfo) {
+                    blightInfected.push(cropInfo.name);
+                  }
+                  changed = true;
+                  return {
+                    ...plot,
+                    pest: true,
+                    pestDays: Math.max(2, (plot.pestDays ?? 0) + 2),
+                    watered: false,
+                    fertilized: false,
+                  };
+                }
+                return plot;
+              });
+            }
+
+            return changed ? processedFarm : prevFarm;
+          });
+
+          if (infestedCrops.length > 0) {
+            const names = Array.from(new Set(infestedCrops)).join('、');
+            addNotification(`🐛 害蟲入侵！${names} 需要使用驅蟲劑。`, { type: 'warning' });
+          }
+
+          if (destroyedCrops.length > 0) {
+            const names = Array.from(new Set(destroyedCrops)).join('、');
+            addNotification(`🥀 ${names} 因害蟲侵蝕而枯萎了……記得提早使用除蟲劑。`, { type: 'error' });
+          }
+
+          if (stormDamaged.length > 0) {
+            const names = Array.from(new Set(stormDamaged)).join('、');
+            addNotification(`⛈️ 暴風雨摧毀了 ${names}，未設溫室的作物損失慘重！`, { type: 'error' });
+          }
+
+          if (blightInfected.length > 0) {
+            const names = Array.from(new Set(blightInfected)).join('、');
+            addNotification(`🦠 ${names} 感染了作物病害，快使用除蟲劑或移入溫室！`, { type: 'warning' });
+          }
+
+          if (autoWatered.size > 0) {
+            const names = Array.from(autoWatered).join('、');
+            addNotification(`🚿 自動灑水器已為 ${names} 補足水分。`, { type: 'info' });
+          }
+
+          if (uncoveredByCoverage.size > 0) {
+            const names = Array.from(uncoveredByCoverage).join('、');
+            addNotification(`🚿 ${names} 超出了現有自動灑水範圍，請考慮升級灌溉設備。`, { type: 'warning' });
+          }
 
           return 6;
         }
@@ -347,7 +1111,7 @@ const FarmGame = () => {
     }, 15000);
 
     return () => clearInterval(timer);
-  }, [season, buildings, animals, addNotification]);
+  }, [season, buildings, animals, addNotification, gameEngine, animalCapacity]);
 
   // 天氣系統
   useEffect(() => {
@@ -373,12 +1137,15 @@ const FarmGame = () => {
         if (plot.crop && plot.plantTime && !plot.pest) {
           const now = Date.now();
           const cropData = CROPS[plot.crop];
-          
+
           let weatherMultiplier = plot.greenhouse ? 1.2 : (cropData.weatherBonus[weather] || 1);
-          const toolMultiplier = TOOLS[tools].speedBoost;
-          
-          const adjustedGrowTime = (cropData.growTime * 60000) / (weatherMultiplier * toolMultiplier);
-          
+          const seasonMultiplier = plot.greenhouse ? 1 : (cropData.seasonBonus?.[season] ?? 1);
+          const toolMultiplier = effectiveToolStats.speedBoost;
+          const fertilizerBoost = plot.fertilized ? 1.25 : 1;
+
+          const adjustedGrowTime = (cropData.growTime * 60000)
+            / (weatherMultiplier * toolMultiplier * fertilizerBoost * seasonMultiplier);
+
           if (now - plot.plantTime >= adjustedGrowTime && !plot.ready) {
             addNotification(`${cropData.emoji} ${cropData.name} 成熟了！`, { type: 'success' });
             return { ...plot, ready: true };
@@ -389,7 +1156,7 @@ const FarmGame = () => {
     }, 5000);
 
     return () => clearInterval(growTimer);
-  }, [weather, tools, addNotification]);
+  }, [weather, season, addNotification, effectiveToolStats]);
 
   // 升級系統
   useEffect(() => {
@@ -400,8 +1167,12 @@ const FarmGame = () => {
     }
   }, [experience, level, addNotification]);
 
-  const buySeed = useCallback((seedType) => {
-    gameEngine.buySeed(seedType);
+  const prepareSeed = useCallback((seedType) => {
+    gameEngine.prepareSeed(seedType);
+  }, [gameEngine]);
+
+  const purchaseSeeds = useCallback((seedType, quantity) => {
+    gameEngine.purchaseSeeds(seedType, quantity);
   }, [gameEngine]);
 
   const plantSeed = useCallback((plotId) => {
@@ -416,8 +1187,28 @@ const FarmGame = () => {
     gameEngine.waterPlot(plotId);
   }, [gameEngine]);
 
-  const buyAnimal = useCallback((animalType) => {
-    gameEngine.buyAnimal(animalType);
+  const expandFarmPlots = useCallback(() => {
+    gameEngine.expandFarm();
+  }, [gameEngine]);
+
+  const expandAnimalPens = useCallback(() => {
+    gameEngine.expandAnimalHousing();
+  }, [gameEngine]);
+
+  const sellInventoryItem = useCallback((itemKey, quantity) => {
+    if (typeof quantity === 'number' && quantity <= 0) {
+      return;
+    }
+
+    if (typeof quantity === 'number') {
+      gameEngine.sellInventoryItem(itemKey, { quantity });
+    } else {
+      gameEngine.sellInventoryItem(itemKey);
+    }
+  }, [gameEngine]);
+
+  const buyAnimal = useCallback((animalType, quantity = 1) => {
+    gameEngine.buyAnimal(animalType, { quantity });
   }, [gameEngine]);
 
   const buyBuilding = useCallback((buildingType) => {
@@ -428,8 +1219,32 @@ const FarmGame = () => {
     gameEngine.buyTool(toolType);
   }, [gameEngine]);
 
+  const slaughterAnimal = useCallback((animalId) => {
+    gameEngine.slaughterAnimal(animalId);
+  }, [gameEngine]);
+
   const feedAnimal = useCallback((animalId) => {
     gameEngine.feedAnimal(animalId);
+  }, [gameEngine]);
+
+  const collectAnimalProduct = useCallback((animalId) => {
+    gameEngine.collectAnimalProduct(animalId);
+  }, [gameEngine]);
+
+  const buySupply = useCallback((supplyType, quantity = 1) => {
+    gameEngine.buySupply(supplyType, { quantity });
+  }, [gameEngine]);
+
+  const selectSupply = useCallback((supplyType) => {
+    gameEngine.selectSupply(supplyType);
+  }, [gameEngine]);
+
+  const applySupply = useCallback((plotId) => gameEngine.applySupply(plotId), [gameEngine]);
+
+  const placeGreenhouse = useCallback((plotId) => gameEngine.placeGreenhouse(plotId), [gameEngine]);
+
+  const treatAnimal = useCallback((animalId) => {
+    gameEngine.treatAnimal(animalId);
   }, [gameEngine]);
 
   const interactNPC = (npc) => {
@@ -497,7 +1312,7 @@ const FarmGame = () => {
           </div>
           <div className="flex items-center space-x-1">
             <Hammer className="w-4 h-4 text-gray-400" />
-            <span className="text-sm">{TOOLS[tools].name}</span>
+            <span className="text-sm">{effectiveToolStats.base.name} Lv.{effectiveToolStats.displayLevel}</span>
           </div>
         </div>
         
@@ -560,62 +1375,138 @@ const FarmGame = () => {
             </div>
             
             {/* 農場格子 */}
+            {pendingGreenhousePlacement && (
+              <div className="mb-3 rounded-lg border border-teal-300 bg-teal-50 px-3 py-2 text-sm text-teal-700 flex items-center gap-2">
+                <Building className="w-4 h-4" />
+                已購買溫室模組，請點選一格尚未設置溫室的農地完成建造。
+              </div>
+            )}
             <div className="grid grid-cols-5 gap-2 mb-4">
-              {farm.map((plot) => (
-                <div key={plot.id} 
-                     className={`aspect-square border-2 rounded-lg cursor-pointer transition-all duration-300 hover:scale-105 relative ${
-                       plot.greenhouse ? 'border-green-600 bg-green-50' :
-                       plot.crop 
-                         ? plot.ready 
-                           ? 'bg-green-200 border-green-400 animate-pulse' 
-                           : 'bg-yellow-100 border-yellow-400'
-                         : 'bg-gray-100 border-gray-300 hover:bg-green-50'
-                     }`}
-                     onClick={() => {
-                       if (plot.crop && plot.ready) {
-                         harvestCrop(plot.id);
-                       } else if (!plot.crop && selectedSeed) {
-                         plantSeed(plot.id);
-                       } else if (plot.crop && !plot.watered) {
-                         waterPlot(plot.id);
-                       }
-                     }}>
-                  <div className="h-full flex flex-col items-center justify-center text-2xl">
-                    {plot.greenhouse && (
-                      <div className="absolute top-0 right-0 text-xs">🏢</div>
-                    )}
-                    {plot.pest && (
-                      <div className="absolute top-0 left-0 text-xs animate-bounce">🐛</div>
-                    )}
-                    {plot.crop ? (
-                      <>
-                        <div className={`transform transition-transform duration-500 ${
-                          plot.ready ? 'scale-125 animate-bounce' : 'scale-100'
-                        }`}>
-                          {CROPS[plot.crop].emoji}
-                        </div>
-                        <div className="flex absolute bottom-0 left-0 right-0 justify-center">
-                          {plot.watered && <Droplets className="w-3 h-3 text-blue-400" />}
-                        </div>
-                      </>
-                    ) : (
-                      selectedSeed && <div className="text-gray-400">+</div>
-                    )}
+              {farm.map((plot) => {
+                const isReady = Boolean(plot.crop && plot.ready);
+                const isGreenhouse = Boolean(plot.greenhouse);
+                const isEmpty = !plot.crop;
+                const highlightForPlacement = pendingGreenhousePlacement && !isGreenhouse;
+
+                let tileStyle = '';
+                if (isReady) {
+                  tileStyle = 'bg-amber-200 border-amber-500 animate-pulse';
+                } else if (isGreenhouse) {
+                  tileStyle = isEmpty
+                    ? 'bg-teal-50 border-teal-400'
+                    : 'bg-teal-100 border-teal-400';
+                } else if (plot.crop) {
+                  tileStyle = 'bg-lime-100 border-lime-400';
+                } else {
+                  tileStyle = 'bg-gray-100 border-gray-300 hover:bg-green-50';
+                }
+
+                const placementRing = highlightForPlacement
+                  ? 'ring-2 ring-teal-400 ring-offset-2'
+                  : '';
+
+                return (
+                  <div key={plot.id}
+                       className={`aspect-square border-2 rounded-lg cursor-pointer transition-all duration-300 hover:scale-105 relative ${tileStyle} ${placementRing}`}
+                       onClick={() => {
+                         if (pendingGreenhousePlacement) {
+                           const handled = placeGreenhouse(plot.id);
+                           if (handled) {
+                             return;
+                           }
+                         }
+
+                         if (selectedSupply) {
+                           const handled = applySupply(plot.id);
+                           if (handled) {
+                             return;
+                           }
+                         }
+
+                         if (plot.crop && plot.ready) {
+                           harvestCrop(plot.id);
+                         } else if (!plot.crop && selectedSeed) {
+                           plantSeed(plot.id);
+                         } else if (plot.crop && !plot.watered) {
+                           waterPlot(plot.id);
+                         }
+                       }}>
+                    <div className="h-full flex flex-col items-center justify-center text-2xl">
+                      {plot.greenhouse && (
+                        <div className="absolute top-0 right-0 text-xs">🏢</div>
+                      )}
+                      {plot.pest && (
+                        <div className="absolute top-0 left-0 text-xs animate-bounce">🐛</div>
+                      )}
+                      {plot.fertilized && !plot.ready && (
+                        <div className="absolute bottom-1 right-1 text-xs">🌿</div>
+                      )}
+                      {plot.crop ? (
+                        <>
+                          <div className={`transform transition-transform duration-500 ${
+                            plot.ready ? 'scale-125 animate-bounce' : 'scale-100'
+                          }`}>
+                            {CROPS[plot.crop].emoji}
+                          </div>
+                          <div className="flex absolute bottom-0 left-0 right-0 justify-center">
+                            {plot.watered && <Droplets className="w-3 h-3 text-blue-400" />}
+                          </div>
+                        </>
+                      ) : (
+                        selectedSeed && <div className="text-gray-400">+</div>
+                      )}
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
+            </div>
+            {sprinklerLevel > 0 && (
+              <div className="mb-4 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-700 flex items-center gap-2">
+                <Droplets className="w-3 h-3" />
+                <span>
+                  自動灑水器 Lv{sprinklerLevel} 覆蓋 {Math.min(sprinklerCoverage, farmSize)}/{farmSize} 格農地，
+                  {sprinklerCoverage < farmSize
+                    ? nextSprinklerUpgrade
+                      ? `升級可擴充至 ${nextSprinklerUpgrade.coverage} 格。`
+                      : '已達覆蓋上限，記得安排人工澆水。'
+                    : '所有作物都會在清晨自動補水。'}
+                </span>
+              </div>
+            )}
+
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-6 text-sm text-gray-700">
+              <div>
+                農地格數：{farmSize}/{MAX_FARM_PLOTS}
+              </div>
+              {nextFarmExpansionCost !== null ? (
+                <button
+                  onClick={expandFarmPlots}
+                  className="self-start sm:self-auto bg-green-500 hover:bg-green-600 text-white px-3 py-1 rounded transition-colors"
+                >
+                  擴建農地（{'$'}{nextFarmExpansionCost} / +{FARM_EXPANSION_BATCH}格）
+                </button>
+              ) : (
+                <span className="text-xs text-gray-500">農地已達最大規模</span>
+              )}
             </div>
 
             {/* 建築展示 */}
-            {Object.keys(buildings).length > 0 && (
+            {buildingEntries.length > 0 && (
               <div className="mt-4">
                 <h3 className="text-lg font-bold mb-2">建築設施</h3>
                 <div className="flex flex-wrap gap-2">
-                  {Object.keys(buildings).map(buildingType => (
-                    <div key={buildingType} 
+                  {buildingEntries.map(entry => (
+                    <div key={entry.key}
                          className="bg-blue-100 rounded-lg p-2 flex items-center space-x-2">
-                      <span className="text-2xl">{BUILDINGS[buildingType].emoji}</span>
-                      <span className="text-sm font-semibold">{BUILDINGS[buildingType].name}</span>
+                      <span className="text-2xl">{entry.meta.emoji}</span>
+                      <span className="text-sm font-semibold">
+                        {entry.meta.name}
+                        {entry.key === 'greenhouse'
+                          ? entry.count ? ` x${entry.count}` : ''
+                          : typeof entry.value === 'number'
+                            ? ` Lv${entry.value}`
+                            : ''}
+                      </span>
                     </div>
                   ))}
                 </div>
@@ -623,24 +1514,52 @@ const FarmGame = () => {
             )}
 
             {/* 動物區域 */}
-            {animals.length > 0 && (
-              <div className="mt-6">
-                <h3 className="text-lg font-bold mb-3">我的動物們</h3>
+            <div className="mt-6">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-3">
+                <h3 className="text-lg font-bold">我的動物們（{animals.length}/{animalCapacity}）</h3>
+                {nextAnimalExpansionCost !== null ? (
+                  <button
+                    onClick={expandAnimalPens}
+                    className="self-start sm:self-auto bg-blue-500 hover:bg-blue-600 text-white px-3 py-1 rounded transition-colors"
+                  >
+                    擴建動物欄（{'$'}{nextAnimalExpansionCost} / +{ANIMAL_CAPACITY_STEP}格）
+                  </button>
+                ) : (
+                  <span className="text-xs text-gray-500">動物欄位已達上限</span>
+                )}
+              </div>
+              {animals.length > 0 ? (
                 <div className="grid grid-cols-4 gap-4">
                   {animals.map((animal) => {
                     const animalData = ANIMALS[animal.type];
-                    const hasBuilding = buildings[animalData.shelter];
+                    const shelterLevel = gameEngine.getBuildingLevel(buildings, animalData.shelter);
+                    const hasBuilding = shelterLevel > 0;
                     const hunger = animal.hunger ?? 50;
                     const isHungry = hunger <= 30;
+                    const isSick = Boolean(animal.sick);
+                    const medicineCount = farmSupplies.medicine || 0;
+                    const productInfo = animalData.product ? ANIMAL_PRODUCTS[animalData.product] : null;
+                    const readyCount = Math.max(0, Math.floor(animal.productReady || 0));
+                    const canCollectProduct = Boolean(productInfo) && readyCount > 0;
                     return (
                       <div key={animal.id}
-                           className={`rounded-lg p-3 transition-colors relative ${
-                             hasBuilding ? 'bg-green-100 hover:bg-green-200' : 'bg-blue-100 hover:bg-blue-200'
+                           className={`rounded-lg p-3 transition-colors relative border ${
+                             isSick
+                               ? 'border-red-300 bg-red-100 hover:bg-red-200'
+                               : hasBuilding
+                                 ? 'border-green-200 bg-green-100 hover:bg-green-200'
+                                 : 'border-blue-200 bg-blue-100 hover:bg-blue-200'
                            }`}>
                         {hasBuilding && (
                           <div className="absolute top-1 right-1 text-xs">
                             {BUILDINGS[animalData.shelter].emoji}
+                            {shelterLevel > 1 && (
+                              <span className="ml-1 text-[10px] font-semibold text-green-700">Lv{shelterLevel}</span>
+                            )}
                           </div>
+                        )}
+                        {isSick && (
+                          <div className="absolute top-1 left-1 text-xs animate-pulse">🤒</div>
                         )}
                         <div className="text-center space-y-2">
                           <div className="text-3xl animate-bounce">
@@ -665,9 +1584,19 @@ const FarmGame = () => {
                                    style={{ width: `${Math.max(0, Math.min(100, hunger))}%` }}></div>
                             </div>
                           </div>
-                          <div className="text-xs text-green-600">
-                            日收入: ${Math.floor(animalData.income * (hasBuilding ? BUILDINGS[animalData.shelter].boost : 1))}
-                          </div>
+                          {productInfo ? (
+                            <div className="text-xs text-amber-600">
+                              產物：{productInfo.emoji} {productInfo.name}
+                              {canCollectProduct && (
+                                <span className="ml-1 font-semibold text-amber-700">可收集 {readyCount}</span>
+                              )}
+                              <span className="ml-1 text-[10px] text-amber-500">（收集後可出售）</span>
+                            </div>
+                          ) : (
+                            <div className="text-xs text-green-600">
+                              日收入: ${Math.floor(animalData.income * (hasBuilding ? BUILDINGS[animalData.shelter].boost : 1))}
+                            </div>
+                          )}
                           <button
                             onClick={() => feedAnimal(animal.id)}
                             className={`w-full text-xs font-semibold py-1 rounded transition-colors ${
@@ -679,13 +1608,47 @@ const FarmGame = () => {
                           {isHungry && (
                             <div className="text-xs text-orange-600">肚子餓扁了，快餵我！</div>
                           )}
+                          {canCollectProduct && (
+                            <button
+                              onClick={() => collectAnimalProduct(animal.id)}
+                              className="w-full text-xs font-semibold py-1 rounded transition-colors bg-amber-400 hover:bg-amber-500 text-amber-900 mt-2"
+                            >
+                              收集 {productInfo?.name || '產物'} (+{readyCount})
+                            </button>
+                          )}
+                          {isSick && (
+                            <div className="mt-2 space-y-1">
+                              <button
+                                onClick={() => treatAnimal(animal.id)}
+                                disabled={medicineCount === 0}
+                                className={`w-full text-xs font-semibold py-1 rounded transition-colors ${
+                                  medicineCount > 0
+                                    ? 'bg-teal-500 hover:bg-teal-600 text-white'
+                                    : 'bg-teal-100 text-teal-700 cursor-not-allowed'
+                                }`}
+                              >
+                                治療 {medicineCount > 0 ? `(剩餘 ${medicineCount})` : '(需要營養劑)'}
+                              </button>
+                              <div className="text-xs text-red-500">身體不適，產出暫停中。</div>
+                            </div>
+                          )}
+                          {animalData.butcher && (
+                            <button
+                              onClick={() => slaughterAnimal(animal.id)}
+                              className="w-full text-xs font-semibold py-1 rounded transition-colors bg-red-200 hover:bg-red-300 text-red-700 mt-2"
+                            >
+                              屠宰換取 {ANIMAL_PRODUCTS[animalData.butcher.product]?.name || '肉品'}
+                            </button>
+                          )}
                         </div>
                       </div>
                     );
                   })}
                 </div>
-              </div>
-            )}
+              ) : (
+                <p className="text-sm text-gray-500">還沒有動物，快到動物商店迎接新成員吧！</p>
+              )}
+            </div>
           </div>
 
           {/* 側邊欄 */}
@@ -724,40 +1687,482 @@ const FarmGame = () => {
                   <Hammer className="mr-2 w-4 h-4" />
                   工具商店
                 </button>
+                <button onClick={() => setShowSupplyShop(true)}
+                        className="w-full bg-teal-500 hover:bg-teal-600 text-white py-2 px-4 rounded transition-colors flex items-center justify-center text-sm">
+                  🌿 農務用品
+                </button>
+              </div>
+            </div>
+
+            {/* 任務告示板 */}
+            <div className="bg-white bg-opacity-90 rounded-lg p-4 shadow-lg">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-lg font-bold flex items-center gap-2">
+                  <Target className="w-4 h-4 text-rose-600" />
+                  任務告示板
+                </h3>
+                <span className="text-xs text-gray-500">進行中 {activeQuests.length}</span>
+              </div>
+              {activeQuests.length > 0 ? (
+                <div className="space-y-2">
+                  {activeQuests.map(({ id, quest, entry, progress, required, ready, inventoryCount }) => {
+                    const badgeText = ready ? '可完成' : entry.status === 'accepted' ? '進行中' : '等待交付';
+                    const badgeClass = ready ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600';
+                    const targetLabel = questManager.getQuestTargetLabel(quest);
+                    const needsText = required > 0 ? `需求：${targetLabel} x${required}` : '';
+                    const progressText = required > 0
+                      ? quest.type === 'deliver'
+                        ? `庫存 ${inventoryCount ?? 0}/${required}`
+                        : `進度 ${progress}/${required}`
+                      : '';
+
+                    return (
+                      <div key={id} className="border border-rose-100 rounded-lg p-3 bg-rose-50/70">
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <p className="text-sm font-semibold text-rose-700 leading-snug">{quest.description}</p>
+                            <p className="text-xs text-gray-600 mt-1">獎勵 ${quest.reward}</p>
+                            {needsText && (
+                              <p className="text-xs text-gray-500 mt-1">{needsText}</p>
+                            )}
+                            {progressText && (
+                              <p className="text-xs text-gray-500">{progressText}</p>
+                            )}
+                          </div>
+                          <span className={`text-[11px] px-2 py-1 rounded-full ${badgeClass}`}>{badgeText}</span>
+                        </div>
+                        <div className="mt-2 flex justify-end">
+                          {quest.type === 'deliver' ? (
+                            <button
+                              onClick={() => deliverQuest(id)}
+                              disabled={!ready}
+                              className={`text-xs font-semibold px-3 py-1 rounded transition-colors ${ready
+                                ? 'bg-rose-500 text-white hover:bg-rose-600'
+                                : 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                              }`}
+                            >
+                              交付
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => claimQuestReward(id)}
+                              disabled={!ready}
+                              className={`text-xs font-semibold px-3 py-1 rounded transition-colors ${ready
+                                ? 'bg-emerald-500 text-white hover:bg-emerald-600'
+                                : 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                              }`}
+                            >
+                              領取獎勵
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <p className="text-sm text-gray-500">
+                  目前沒有進行中的任務，去和鄰居聊聊看看是否需要幫忙吧！
+                </p>
+              )}
+
+              <div className="mt-4 pt-3 border-t border-rose-100">
+                <h4 className="text-sm font-semibold text-rose-600 mb-2">今日佈告欄任務</h4>
+                {availableDynamicQuests.length > 0 ? (
+                  <div className="space-y-2">
+                    {availableDynamicQuests.map(({ id, quest }) => {
+                      const required = quest.count ?? 0;
+                      const targetLabel = questManager.getQuestTargetLabel(quest);
+                      return (
+                        <div key={id} className="border border-rose-100 rounded-lg p-3 bg-white/70">
+                          <div className="flex items-start justify-between gap-2">
+                            <div>
+                              <p className="text-sm font-semibold text-rose-700 leading-snug">{quest.description}</p>
+                              <p className="text-xs text-gray-600 mt-1">獎勵 ${quest.reward}</p>
+                              {required > 0 && targetLabel !== '目標' && (
+                                <p className="text-xs text-gray-500 mt-1">需求：{targetLabel} x{required}</p>
+                              )}
+                            </div>
+                            <span className="text-[11px] px-2 py-1 rounded-full bg-rose-100 text-rose-600">{quest.npcName}</span>
+                          </div>
+                          <div className="mt-2 flex justify-end">
+                            <button
+                              onClick={() => acceptQuest(id)}
+                              className="text-xs font-semibold px-3 py-1 rounded bg-rose-500 text-white hover:bg-rose-600 transition-colors"
+                            >
+                              接受任務
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <p className="text-xs text-gray-500">今日暫無新的佈告欄委託，明天再來看看吧！</p>
+                )}
               </div>
             </div>
 
             {/* 市場價格 */}
             <div className="bg-white bg-opacity-90 rounded-lg p-4 shadow-lg">
-              <h3 className="text-lg font-bold mb-3">市場價格</h3>
-              <div className="space-y-1">
-                {Object.entries(marketPrices).slice(0, 3).map(([crop, price]) => (
-                  <div key={crop} className="flex justify-between items-center text-sm">
-                    <span>{CROPS[crop].emoji} {CROPS[crop].name}</span>
-                    <span className={`font-semibold ${
-                      price > CROPS[crop].sellPrice ? 'text-green-600' : 
-                      price < CROPS[crop].sellPrice ? 'text-red-600' : 'text-gray-600'
-                    }`}>
-                      ${price}
-                    </span>
+              <div className="flex flex-wrap items-start justify-between gap-2 mb-3">
+                <h3 className="text-lg font-bold flex items-center gap-2">
+                  <TrendingUp className="w-4 h-4 text-green-600" />
+                  市場價格
+                </h3>
+                <div className="flex flex-col items-end gap-2 text-xs">
+                  <div className="flex items-center gap-1 text-gray-500">
+                    <Clock3 className="w-3 h-3" />
+                    <span>{marketUpdateTime ? new Date(marketUpdateTime).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' }) : '更新中…'}</span>
                   </div>
-                ))}
+                  <div className="flex items-center gap-1 bg-gray-100 rounded-full p-1">
+                    <button
+                      onClick={() => setMarketView('summary')}
+                      className={`px-2 py-1 rounded-full transition-colors ${marketView === 'summary' ? 'bg-green-500 text-white' : 'text-gray-600 hover:text-green-600'}`}
+                    >
+                      日常總覽
+                    </button>
+                    <button
+                      onClick={() => setMarketView('list')}
+                      className={`px-2 py-1 rounded-full transition-colors ${marketView === 'list' ? 'bg-green-500 text-white' : 'text-gray-600 hover:text-green-600'}`}
+                    >
+                      完整列表
+                    </button>
+                  </div>
+                </div>
               </div>
+              <div className="bg-slate-50 border border-slate-200 rounded-lg p-2 mb-3">
+                <div className="flex items-center justify-between text-xs text-slate-600">
+                  <span>平均行情指數</span>
+                  <span className={`font-semibold ${marketInsights.averageIndex >= 1 ? 'text-green-600' : 'text-red-600'}`}>
+                    {(marketInsights.averageIndex * 100).toFixed(0)}%
+                  </span>
+                </div>
+                <div className="bg-slate-200 h-1 rounded-full overflow-hidden mt-2">
+                  <div
+                    className={`${marketInsights.averageIndex >= 1 ? 'bg-green-400' : 'bg-red-400'} h-full transition-all`}
+                    style={{ width: `${Math.min(100, Math.max(6, marketInsights.averageIndex * 100))}%` }}
+                  ></div>
+                </div>
+              </div>
+              {marketView === 'summary' ? (
+                <>
+                  {marketInsights.risers.length > 0 && (
+                    <div className="mb-3">
+                      <div className="flex items-center gap-1 text-xs font-semibold text-green-600 uppercase tracking-wide">
+                        <TrendingUp className="w-3 h-3" />
+                        漲勢領先
+                      </div>
+                      <div className="mt-1 space-y-1">
+                        {marketInsights.risers.map(entry => {
+                          const percentText = entry.percentFromPrevious != null ? entry.percentFromPrevious.toFixed(1) : '—';
+                          const percentDisplay = percentText === '—' ? '—' : `${percentText}%`;
+                          return (
+                            <div key={`rise-${entry.key}`} className="flex items-center justify-between text-xs bg-green-50 border border-green-100 rounded px-2 py-1 text-green-700">
+                              <span>{entry.emoji} {entry.name}</span>
+                              <span>
+                                +${entry.changeFromPrevious} ({percentDisplay})
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                  {marketInsights.fallers.length > 0 && (
+                    <div className="mb-3">
+                      <div className="flex items-center gap-1 text-xs font-semibold text-red-600 uppercase tracking-wide">
+                        <TrendingDown className="w-3 h-3" />
+                        價格回落
+                      </div>
+                      <div className="mt-1 space-y-1">
+                        {marketInsights.fallers.map(entry => {
+                          const percentText = entry.percentFromPrevious != null ? Math.abs(entry.percentFromPrevious).toFixed(1) : '—';
+                          const percentDisplay = percentText === '—' ? '—' : `${percentText}%`;
+                          return (
+                            <div key={`fall-${entry.key}`} className="flex items-center justify-between text-xs bg-red-50 border border-red-100 rounded px-2 py-1 text-red-700">
+                              <span>{entry.emoji} {entry.name}</span>
+                              <span>
+                                -${Math.abs(entry.changeFromPrevious)} ({percentDisplay})
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                  <div className="space-y-2 border-t border-slate-200 pt-2">
+                    {marketInsights.sortedByPremium.slice(0, 5).map(entry => {
+                      const trend = entry.changeFromPrevious ?? 0;
+                      const trendClass = trend > 0 ? 'text-green-600' : trend < 0 ? 'text-red-600' : 'text-gray-500';
+                      const premiumClass = entry.changeFromBase > 0 ? 'text-green-600' : entry.changeFromBase < 0 ? 'text-red-600' : 'text-gray-600';
+                      const percentFromPrevious = entry.percentFromPrevious != null ? entry.percentFromPrevious.toFixed(1) : '—';
+                      const premiumPercent = `${entry.percentFromBase >= 0 ? '+' : ''}${entry.percentFromBase.toFixed(1)}%`;
+                      const priceShare = marketInsights.highestPrice > 0 ? Math.min(100, Math.max(6, (entry.price / marketInsights.highestPrice) * 100)) : 0;
+
+                      return (
+                        <div key={entry.key} className="rounded-lg border border-slate-200 p-2">
+                          <div className="flex justify-between items-center text-sm font-semibold text-slate-800">
+                            <span>{entry.emoji} {entry.name}</span>
+                            <span>${entry.price}</span>
+                          </div>
+                          <div className="flex justify-between text-xs mt-1 text-slate-500">
+                            <span>基準 ${entry.basePrice}</span>
+                            <span className={premiumClass}>
+                              {entry.changeFromBase >= 0 ? '+' : ''}{entry.changeFromBase} ({premiumPercent})
+                            </span>
+                          </div>
+                          <div className="flex justify-between text-xs mt-1">
+                            <span className={trendClass}>
+                              {trend > 0 ? `▲ +${trend}` : trend < 0 ? `▼ ${trend}` : '→ 持平'}
+                            </span>
+                            <span className={trendClass}>
+                              {percentFromPrevious !== '—' ? `${trend > 0 ? '+' : ''}${percentFromPrevious}%` : '—'}
+                            </span>
+                          </div>
+                          <div className="bg-slate-100 h-1 rounded-full overflow-hidden mt-2">
+                            <div
+                              className="bg-slate-400 h-full transition-all"
+                              style={{ width: `${priceShare}%` }}
+                            ></div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="flex justify-end mb-2">
+                    <div className="flex items-center gap-1 text-[11px] text-gray-600 bg-gray-100 rounded-full px-2 py-1">
+                      排序：
+                      <button
+                        onClick={() => setMarketListSort('price')}
+                        className={`px-2 py-[2px] rounded-full transition-colors ${marketListSort === 'price' ? 'bg-green-500 text-white' : 'text-gray-600 hover:text-green-600'}`}
+                      >
+                        價格
+                      </button>
+                      <button
+                        onClick={() => setMarketListSort('premium')}
+                        className={`px-2 py-[2px] rounded-full transition-colors ${marketListSort === 'premium' ? 'bg-green-500 text-white' : 'text-gray-600 hover:text-green-600'}`}
+                      >
+                        較基準
+                      </button>
+                      <button
+                        onClick={() => setMarketListSort('change')}
+                        className={`px-2 py-[2px] rounded-full transition-colors ${marketListSort === 'change' ? 'bg-green-500 text-white' : 'text-gray-600 hover:text-green-600'}`}
+                      >
+                        較昨日
+                      </button>
+                    </div>
+                  </div>
+                  <div className="border border-slate-200 rounded-lg overflow-hidden">
+                    <div className="grid grid-cols-4 gap-2 px-3 py-2 text-xs font-semibold text-slate-600 bg-slate-100">
+                      <span>作物</span>
+                      <span className="text-right">現價</span>
+                      <span className="text-right">對基準</span>
+                      <span className="text-right">對昨日</span>
+                    </div>
+                    {sortedMarketEntries.length > 0 ? (
+                      sortedMarketEntries.map(entry => {
+                        const baseChange = entry.changeFromBase ?? 0;
+                        const basePercent = entry.percentFromBase ?? 0;
+                        const baseClass = baseChange > 0 ? 'text-green-600' : baseChange < 0 ? 'text-red-600' : 'text-slate-500';
+                        const change = entry.changeFromPrevious ?? 0;
+                        const changePercent = entry.percentFromPrevious ?? 0;
+                        const changeClass = change > 0 ? 'text-green-600' : change < 0 ? 'text-red-600' : 'text-slate-500';
+                        const changeDisplay = entry.changeFromPrevious == null ? '—' : `${change > 0 ? '+' : ''}${change} (${changePercent >= 0 ? '+' : ''}${changePercent.toFixed(1)}%)`;
+                        const baseDisplay = `${baseChange >= 0 ? '+' : ''}${baseChange} (${basePercent >= 0 ? '+' : ''}${basePercent.toFixed(1)}%)`;
+
+                        return (
+                          <div key={`list-${entry.key}`} className="grid grid-cols-4 gap-2 px-3 py-2 text-xs border-t border-slate-100">
+                            <span className="flex items-center gap-2 font-medium text-slate-700">
+                              <span>{entry.emoji}</span>
+                              {entry.name}
+                            </span>
+                            <span className="text-right font-semibold text-slate-800">${entry.price}</span>
+                            <span className={`text-right ${baseClass}`}>{baseDisplay}</span>
+                            <span className={`text-right ${changeClass}`}>{changeDisplay}</span>
+                          </div>
+                        );
+                      })
+                    ) : (
+                      <div className="px-3 py-4 text-xs text-center text-slate-500 border-t border-slate-100">
+                        暫無市場資料。
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
             </div>
 
             {/* 庫存 */}
             <div className="bg-white bg-opacity-90 rounded-lg p-4 shadow-lg">
-              <h3 className="text-lg font-bold mb-3">庫存</h3>
-              {Object.entries(inventory).map(([crop, count]) => (
-                count > 0 && (
-                  <div key={crop} className="flex justify-between items-center py-1">
-                    <span>{CROPS[crop].emoji} {CROPS[crop].name}</span>
-                    <span className="font-semibold">{count}</span>
+              <div className="flex items-start justify-between mb-3">
+                <div>
+                  <h3 className="text-lg font-bold flex items-center gap-2">
+                    <Boxes className="w-4 h-4 text-amber-600" />
+                    庫存
+                  </h3>
+                  <p className="text-xs text-gray-500 mt-1">作物、畜產品與囤積的種子都會統一列在這裡。</p>
+                </div>
+                <div className="text-right text-xs">
+                  <div className="text-gray-500">共 {inventoryInsights.totalCount} 件</div>
+                  <div className="text-amber-600 font-semibold">估值 ${inventoryInsights.totalValue}</div>
+                </div>
+              </div>
+              {inventoryInsights.items.length > 0 && (
+                <div className="flex justify-end mb-2">
+                  <div className="flex items-center gap-1 text-[11px] text-amber-700 bg-amber-100 rounded-full px-2 py-1">
+                    排序：
+                    <button
+                      onClick={() => setInventorySortMode('value')}
+                      className={`px-2 py-[2px] rounded-full transition-colors ${inventorySortMode === 'value' ? 'bg-amber-500 text-white' : 'text-amber-700 hover:text-amber-900'}`}
+                    >
+                      總價值
+                    </button>
+                    <button
+                      onClick={() => setInventorySortMode('count')}
+                      className={`px-2 py-[2px] rounded-full transition-colors ${inventorySortMode === 'count' ? 'bg-amber-500 text-white' : 'text-amber-700 hover:text-amber-900'}`}
+                    >
+                      數量
+                    </button>
                   </div>
-                )
-              ))}
-              {Object.values(inventory).every(count => count === 0) && (
-                <p className="text-gray-500 text-sm">庫存為空</p>
+                </div>
+              )}
+              {inventoryInsights.items.length > 0 ? (
+                <div className="space-y-2">
+                  {inventoryInsights.items.map(item => {
+                    const halfQuantity = Math.floor(item.count / 2);
+                    const shareWidth = item.share > 0 ? Math.min(100, Math.max(6, item.share)) : 0;
+                    const typeLabel = item.type === 'seed'
+                      ? '種子'
+                      : item.type === 'product'
+                        ? '畜產品'
+                        : '作物';
+                    const valueLabel = item.type === 'seed' ? '估值' : '單價';
+
+                    return (
+                      <div key={item.key} className="rounded-lg border border-amber-200 bg-amber-50/80 p-3">
+                        <div className="flex justify-between items-start">
+                          <div className="flex items-center gap-3">
+                            <div className="text-2xl">{item.emoji}</div>
+                            <div>
+                              <div className="font-semibold text-sm text-amber-900">{item.name}</div>
+                              <div className="text-xs text-amber-700">
+                                {typeLabel} · {valueLabel} ${item.unitValue}
+                              </div>
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <div className="font-bold text-sm text-amber-900">x{item.count}</div>
+                            <div className="text-xs text-amber-700">總值 ${item.totalValue}</div>
+                          </div>
+                        </div>
+                        <div className="bg-amber-100 h-1 rounded-full overflow-hidden mt-2">
+                          <div
+                            className="bg-amber-400 h-full transition-all"
+                            style={{ width: `${shareWidth}%` }}
+                          ></div>
+                        </div>
+                        {item.canSell && (
+                          <div className="flex justify-end gap-2 mt-2">
+                            {halfQuantity > 0 && halfQuantity < item.count && (
+                              <button
+                                onClick={() => sellInventoryItem(item.key, halfQuantity)}
+                                className="text-xs bg-white border border-amber-300 hover:border-amber-400 text-amber-700 px-2 py-1 rounded transition-colors"
+                              >
+                                出售 {halfQuantity} 個
+                              </button>
+                            )}
+                            <button
+                              onClick={() => sellInventoryItem(item.key)}
+                              className="text-xs bg-amber-500 hover:bg-amber-600 text-white px-2 py-1 rounded transition-colors"
+                            >
+                              全部出售（${item.totalValue}）
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <p className="text-gray-500 text-sm">庫存為空，快去田裡收成或向動物們索取產品吧！</p>
+              )}
+            </div>
+
+            {/* 農務用品 */}
+            <div className="bg-white bg-opacity-90 rounded-lg p-4 shadow-lg">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-lg font-bold">農務用品</h3>
+                <span className="text-xs text-gray-500">點擊選擇使用</span>
+              </div>
+              <div className="space-y-2">
+                {Object.entries(FARM_SUPPLIES).map(([key, supply]) => {
+                  const count = farmSupplies[key] || 0;
+                  const isSelected = selectedSupply === key;
+                  const isOut = count === 0;
+                  const disabled = isOut && key !== 'medicine';
+                  return (
+                    <button
+                      key={key}
+                      onClick={() => selectSupply(key)}
+                      disabled={disabled}
+                      className={`w-full flex items-center justify-between text-sm border rounded-lg px-3 py-2 transition-colors ${
+                        isSelected ? 'border-teal-500 bg-teal-50 text-teal-700' : 'border-gray-200 hover:border-teal-300'
+                      } ${isOut ? 'opacity-70 cursor-not-allowed' : ''}`}
+                    >
+                      <span className="flex items-center gap-2">
+                        <span>{supply.emoji}</span>
+                        <span className="font-semibold">{supply.name}</span>
+                      </span>
+                      <span className="text-xs text-gray-600">庫存 {count}</span>
+                    </button>
+                  );
+                })}
+              </div>
+              {seedStorage.length > 0 && (
+                <div className="mt-4 border-t border-teal-200 pt-3">
+                  <h4 className="text-sm font-semibold text-teal-700 mb-2">種子倉庫</h4>
+                  <div className="space-y-2">
+                    {seedStorage.map(seed => {
+                      const isSelected = selectedSeed === seed.cropKey;
+                      return (
+                        <button
+                          key={seed.key}
+                          onClick={() => prepareSeed(seed.cropKey)}
+                          className={`w-full flex items-center justify-between text-sm border rounded-lg px-3 py-2 transition-colors ${
+                            isSelected ? 'border-amber-500 bg-amber-50 text-amber-700' : 'border-amber-200 hover:border-amber-400'
+                          }`}
+                        >
+                          <span className="flex items-center gap-2">
+                            <span>{seed.emoji}</span>
+                            <span className="font-semibold">{seed.name} 種子</span>
+                          </span>
+                          <span className="text-xs text-gray-600">庫存 {seed.count} 包</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <p className="text-[11px] text-amber-600 mt-2">
+                    點擊即可帶著種子外出種植；庫存不足時系統會改為現金購買。
+                  </p>
+                </div>
+              )}
+              {selectedSupply && FARM_SUPPLIES[selectedSupply] && (
+                <div className="mt-2 space-y-1">
+                  <p className="text-xs text-teal-700">目前選擇：{FARM_SUPPLIES[selectedSupply].name}</p>
+                  <button
+                    onClick={() => setSelectedSupply(null)}
+                    className="text-[11px] text-teal-600 hover:text-teal-800"
+                  >
+                    取消選擇
+                  </button>
+                </div>
+              )}
+              {!hasAnyBaseSupply && (
+                <p className="text-xs text-gray-500 mt-2">沒有庫存？到農務用品購買吧！</p>
               )}
             </div>
 
@@ -771,6 +2176,12 @@ const FarmGame = () => {
                     <div>{CROPS[selectedSeed].name}</div>
                     <div className="text-sm text-gray-600">
                       成長時間: {CROPS[selectedSeed].growTime}分鐘
+                    </div>
+                    <div className="text-sm text-gray-600">
+                      倉庫種子: {inventory[`seed_${selectedSeed}`] || 0} 包
+                    </div>
+                    <div className="text-xs text-gray-500">
+                      無庫存時植入需花費 ${marketPrices[selectedSeed] || CROPS[selectedSeed].price}
                     </div>
                   </div>
                 </div>
@@ -815,6 +2226,7 @@ const FarmGame = () => {
                   <li>到「種子商店」買種子，在農田空格種下會消耗體力。</li>
                   <li>不同作物有不同成長時間，天氣與工具等級會改變速度。</li>
                   <li>澆水、在溫室種植或擁有筒倉，都能提高售價。</li>
+                  <li>農務用品提供肥料與驅蟲劑，肥料能縮短成熟時間，害蟲會讓作物暫停生長。</li>
                   <li>例子：玉米基準價 $50，若有澆水（+20%）又在溫室（+50%），收成價約可達 $90。</li>
                 </ul>
               </section>
@@ -824,13 +2236,14 @@ const FarmGame = () => {
                   <li>在「動物商店」購買，部分動物需要先蓋對應建築。</li>
                   <li>每天餵食會扣飼料費，但能維持快樂度（最高 100）。</li>
                   <li>快樂度越高，產出的金幣越多；建築會提供額外加成。</li>
+                  <li>動物長期飢餓或心情低落會生病，產出停擺，記得準備營養劑治療。</li>
                 </ul>
               </section>
               <section>
                 <h3 className="font-semibold text-lg text-blue-600">🏠 建築與工具</h3>
                 <ul className="list-disc pl-5 space-y-1 mt-2">
                   <li>建築能提升產量或帶來特殊效果，例如溫室免受天氣影響、筒倉賣價 +10%。</li>
-                  <li>工具分四個等級，等級越高越省體力、作物長得越快。</li>
+                  <li>工具共有多階段升級，每提升一級作物成長加快 15%，魔法工具更能無限強化。</li>
                 </ul>
               </section>
               <section>
@@ -879,25 +2292,61 @@ const FarmGame = () => {
           <div className="bg-white rounded-lg p-6 max-w-2xl w-full mx-4 max-h-96 overflow-y-auto">
             <h2 className="text-xl font-bold mb-4">種子商店</h2>
             <div className="grid grid-cols-3 gap-4">
-              {Object.entries(CROPS).map(([key, crop]) => (
-                <div key={key} 
-                     className="border rounded-lg p-4 cursor-pointer hover:bg-gray-50 transition-colors"
-                     onClick={() => buySeed(key)}>
-                  <div className="text-center">
-                    <div className="text-3xl mb-2">{crop.emoji}</div>
-                    <div className="font-semibold">{crop.name}</div>
-                    <div className="text-green-600 font-bold">
-                      ${marketPrices[key] || crop.price}
+              {Object.entries(CROPS).map(([key, crop]) => {
+                const price = marketPrices[key] || crop.price;
+                const seedKey = `seed_${key}`;
+                const storedSeeds = inventory[seedKey] || 0;
+                const seasonEntries = Object.entries(crop.seasonBonus || {});
+                const favorableSeasons = seasonEntries
+                  .filter(([, value]) => value > 1.05)
+                  .map(([seasonKey]) => GameFormatter.seasonName(seasonKey));
+                const riskySeasons = seasonEntries
+                  .filter(([, value]) => value < 0.9)
+                  .map(([seasonKey]) => GameFormatter.seasonName(seasonKey));
+
+                return (
+                  <div key={key}
+                       className="border rounded-lg p-4 bg-white/90 shadow-sm flex flex-col gap-3">
+                    <div className="text-center space-y-1">
+                      <div className="text-3xl">{crop.emoji}</div>
+                      <div className="font-semibold">{crop.name}</div>
+                      <div className="text-green-600 font-bold">${price}</div>
+                      <div className="text-xs text-gray-500">成長: {crop.growTime}分鐘</div>
+                      <div className="text-xs text-blue-600">基礎售價: ${crop.sellPrice}</div>
+                      <div className="text-xs text-amber-600">種子庫存: {storedSeeds} 包</div>
+                      {favorableSeasons.length > 0 && (
+                        <div className="text-[11px] text-emerald-600">適合季節：{favorableSeasons.join('、')}</div>
+                      )}
+                      {riskySeasons.length > 0 && (
+                        <div className="text-[11px] text-rose-500">避免季節：{riskySeasons.join('、')}</div>
+                      )}
                     </div>
-                    <div className="text-xs text-gray-500">
-                      成長: {crop.growTime}分鐘
-                    </div>
-                    <div className="text-xs text-blue-600">
-                      基礎售價: ${crop.sellPrice}
+                    <div className="space-y-2">
+                      <button
+                        onClick={() => {
+                          prepareSeed(key);
+                          setShowShop(false);
+                        }}
+                        className="w-full text-sm bg-green-500 hover:bg-green-600 text-white py-1.5 rounded transition-colors"
+                      >
+                        準備種植
+                      </button>
+                      <div className="text-[11px] text-gray-500 text-center">大量進貨可趁特價</div>
+                      <div className="flex gap-2">
+                        {[1, 5, 10].map(amount => (
+                          <button
+                            key={amount}
+                            onClick={() => purchaseSeeds(key, amount)}
+                            className="flex-1 text-xs border border-green-200 hover:border-green-400 text-green-700 rounded py-1 transition-colors"
+                          >
+                            買 {amount}
+                          </button>
+                        ))}
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
             <button onClick={() => setShowShop(false)}
                     className="mt-4 w-full bg-gray-500 hover:bg-gray-600 text-white py-2 px-4 rounded transition-colors">
@@ -914,10 +2363,8 @@ const FarmGame = () => {
             <h2 className="text-xl font-bold mb-4">動物商店</h2>
             <div className="grid grid-cols-2 gap-4">
               {Object.entries(ANIMALS).map(([key, animal]) => (
-                <div key={key} 
-                     className="border rounded-lg p-4 cursor-pointer hover:bg-gray-50 transition-colors"
-                     onClick={() => buyAnimal(key)}>
-                  <div className="text-center">
+                <div key={key} className="border rounded-lg p-4 bg-white/90 shadow-sm">
+                  <div className="text-center space-y-1">
                     <div className="text-3xl mb-2">{animal.emoji}</div>
                     <div className="font-semibold">{animal.name}</div>
                     <div className="text-green-600 font-bold">${animal.price}</div>
@@ -930,6 +2377,17 @@ const FarmGame = () => {
                     <div className="text-xs text-purple-600">
                       需要: {BUILDINGS[animal.shelter]?.name || '無'}
                     </div>
+                  </div>
+                  <div className="flex gap-2 mt-3">
+                    {[1, 3].map(amount => (
+                      <button
+                        key={amount}
+                        onClick={() => buyAnimal(key, amount)}
+                        className="flex-1 text-xs bg-blue-500/10 text-blue-700 border border-blue-200 hover:border-blue-400 rounded py-1 transition-colors"
+                      >
+                        購買 {amount}
+                      </button>
+                    ))}
                   </div>
                 </div>
               ))}
@@ -946,37 +2404,98 @@ const FarmGame = () => {
       {showBuildingShop && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg p-6 max-w-3xl w-full mx-4 max-h-96 overflow-y-auto">
-            <h2 className="text-xl font-bold mb-4">建築商店</h2>
-            <div className="grid grid-cols-2 gap-4">
-              {Object.entries(BUILDINGS).map(([key, building]) => (
-                <div key={key} 
-                     className={`border rounded-lg p-4 cursor-pointer transition-colors ${
-                       buildings[key] 
-                         ? 'bg-green-100 border-green-400' 
-                         : 'hover:bg-gray-50'
-                     }`}
-                     onClick={() => buyBuilding(key)}>
-                  <div className="text-center">
-                    <div className="text-3xl mb-2">{building.emoji}</div>
-                    <div className="font-semibold">{building.name}</div>
-                    <div className={`font-bold ${buildings[key] ? 'text-green-600' : 'text-green-600'}`}>
-                      {buildings[key] ? '已擁有' : `${building.price}`}
-                    </div>
-                    <div className="text-xs text-gray-600 mt-2">
-                      {building.description}
-                    </div>
-                    {building.boost !== 1.0 && (
-                      <div className="text-xs text-blue-600">
-                        效果加成: {Math.round(building.boost * 100)}%
+              <h2 className="text-xl font-bold mb-4">建築商店</h2>
+              <div className="grid grid-cols-2 gap-4">
+                {Object.entries(BUILDINGS).map(([key, building]) => {
+                  const rawValue = buildings?.[key];
+                  const isGreenhouse = key === 'greenhouse';
+                  const greenhouseCount = isGreenhouse
+                    ? (typeof rawValue === 'number'
+                      ? rawValue
+                      : (rawValue && Array.isArray(farm) ? farm.filter(plot => plot.greenhouse).length : 0))
+                    : 0;
+                  const currentLevel = isGreenhouse ? greenhouseCount : gameEngine.getBuildingLevel(buildings, key);
+                  const upgrades = BUILDING_UPGRADES[key] || [];
+                  const hasLevels = upgrades.length > 0;
+                  const nextUpgrade = hasLevels
+                    ? upgrades.find(entry => entry.level === currentLevel + 1)
+                    : null;
+                  const currentInfo = hasLevels
+                    ? upgrades.find(entry => entry.level === (currentLevel > 0 ? currentLevel : upgrades[0].level))
+                    : null;
+                  const isOwned = isGreenhouse ? greenhouseCount > 0 : currentLevel > 0;
+                  const canPurchase = isGreenhouse
+                    ? true
+                    : hasLevels
+                      ? Boolean(nextUpgrade)
+                      : !isOwned;
+                  const cardHighlight = isGreenhouse && greenhouseCount > 0
+                    ? 'bg-teal-50 border-teal-300'
+                    : isOwned
+                      ? (hasLevels && !nextUpgrade ? 'bg-amber-50 border-amber-300' : 'bg-green-100 border-green-400')
+                      : 'hover:bg-gray-50';
+                  const priceLabel = isGreenhouse
+                    ? `$${building.price}`
+                    : hasLevels
+                      ? nextUpgrade
+                        ? `$${nextUpgrade.cost}`
+                        : '已滿級'
+                      : isOwned
+                        ? '已擁有'
+                        : `$${building.price}`;
+                  const actionLabel = isGreenhouse
+                    ? (greenhouseCount > 0 ? '再購一格' : '建造')
+                    : hasLevels
+                      ? nextUpgrade
+                        ? (currentLevel > 0 ? `升級至 Lv${nextUpgrade.level}` : '建造')
+                        : `Lv${currentLevel}`
+                      : (isOwned ? '已建造' : '建造');
+
+                  return (
+                    <div key={key}
+                         className={`border rounded-lg p-4 transition-colors ${cardHighlight} ${canPurchase ? 'cursor-pointer' : 'cursor-not-allowed opacity-80'}`}
+                         onClick={() => canPurchase && buyBuilding(key)}>
+                      <div className="text-center space-y-2">
+                        <div className="text-3xl mb-2">{building.emoji}</div>
+                        <div className="font-semibold">
+                          {building.name}
+                          {hasLevels && currentLevel > 0 && key !== 'greenhouse' && (
+                            <span className="ml-1 text-sm text-green-600">Lv{currentLevel}</span>
+                          )}
+                        </div>
+                        <div className={`font-bold ${canPurchase ? 'text-green-600' : 'text-gray-500'}`}>{priceLabel}</div>
+                        <div className="text-xs text-gray-500">{actionLabel}</div>
+                        <div className="text-xs text-gray-600 mt-2 space-y-1">
+                          <p>{building.description}</p>
+                          {isGreenhouse && (
+                            <p className="text-teal-600">
+                              {greenhouseCount > 0
+                                ? `目前共有 ${greenhouseCount} 格溫室土地，可再購買擴充。`
+                                : '每次購買可讓一格農地升級為溫室。'}
+                            </p>
+                          )}
+                          {hasLevels && currentInfo && (
+                            <p className={currentLevel > 0 ? 'text-green-600' : 'text-blue-600'}>
+                              {currentLevel > 0 ? `目前 Lv${currentLevel}：` : '等級預覽：'}{currentInfo.description}
+                            </p>
+                          )}
+                          {hasLevels && nextUpgrade && (
+                            <p className="text-blue-600">下一級：{nextUpgrade.description}</p>
+                          )}
+                        </div>
+                        {!hasLevels && building.boost !== 1.0 && (
+                          <div className="text-xs text-blue-600">
+                            效果加成: {Math.round(building.boost * 100)}%
+                          </div>
+                        )}
                       </div>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-            <button onClick={() => setShowBuildingShop(false)}
-                    className="mt-4 w-full bg-gray-500 hover:bg-gray-600 text-white py-2 px-4 rounded transition-colors">
-              關閉
+                    </div>
+                  );
+                })}
+              </div>
+              <button onClick={() => setShowBuildingShop(false)}
+                      className="mt-4 w-full bg-gray-500 hover:bg-gray-600 text-white py-2 px-4 rounded transition-colors">
+                關閉
             </button>
           </div>
         </div>
@@ -988,34 +2507,116 @@ const FarmGame = () => {
           <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
             <h2 className="text-xl font-bold mb-4">工具商店</h2>
             <div className="space-y-4">
-              {Object.entries(TOOLS).map(([key, tool]) => (
-                <div key={key} 
-                     className={`border rounded-lg p-4 cursor-pointer transition-colors ${
-                       tools === key 
-                         ? 'bg-green-100 border-green-400' 
-                         : 'hover:bg-gray-50'
-                     }`}
-                     onClick={() => buyTool(key)}>
-                  <div className="flex justify-between items-center">
+              {Object.entries(TOOLS).map(([key, tool]) => {
+                const isActive = tools === key;
+                const isOwned = ownedTools.includes(key);
+                const currentLevel = toolLevels?.[key] ?? 0;
+                const ownedLevel = isOwned ? currentLevel : 0;
+                const displayLevel = ownedLevel + 1;
+                const displaySpeed = (tool.speedBoost || 1) + (tool.speedUpgrade || 0) * ownedLevel;
+                const displayEnergy = (tool.energyReduction || 0) + (tool.energyUpgrade || 0) * ownedLevel;
+                const nextUpgradeCost = tool.upgradeCost;
+                const canUpgrade = isOwned && Boolean(nextUpgradeCost);
+                const cardClass = isActive
+                  ? 'bg-green-100 border-green-400'
+                  : isOwned
+                    ? 'border-blue-300 bg-blue-50/60 hover:bg-blue-100'
+                    : 'hover:bg-gray-50';
+                const priceLabel = isActive
+                  ? '已裝備'
+                  : isOwned
+                    ? '已購買'
+                    : tool.price === 0
+                      ? '免費'
+                      : `$${tool.price}`;
+
+                return (
+                  <div
+                    key={key}
+                    className={`border rounded-lg p-4 cursor-pointer transition-colors ${cardClass}`}
+                    onClick={() => buyTool(key)}
+                  >
+                    <div className="flex justify-between items-start gap-3">
+                      <div>
+                        <div className="font-semibold">{tool.name} {isOwned && <span className="text-xs text-gray-500">Lv.{displayLevel}</span>}</div>
+                        <div className="text-sm text-gray-600">
+                          節省體力: {Math.round(displayEnergy)}
+                        </div>
+                        <div className="text-sm text-gray-600">
+                          速度加成: {Math.round(displaySpeed * 100)}%
+                        </div>
+                        {canUpgrade && (
+                          <div className="mt-2 text-xs text-amber-600">
+                            下一級可達 {Math.round(((tool.speedBoost || 1) + (tool.speedUpgrade || 0) * (ownedLevel + 1)) * 100)}%／節省 {Math.round((tool.energyReduction || 0) + (tool.energyUpgrade || 0) * (ownedLevel + 1))}
+                          </div>
+                        )}
+                      </div>
+                      <div className="text-right">
+                        <div className={`font-bold ${isActive ? 'text-green-600' : 'text-blue-600'}`}>
+                          {priceLabel}
+                        </div>
+                        {isOwned && !isActive && (
+                          <div className="text-[11px] text-blue-500">點擊切換</div>
+                        )}
+                      </div>
+                    </div>
+                    {canUpgrade && (
+                      <div className="mt-3 flex items-center justify-between gap-3">
+                        <span className="text-xs text-gray-500">目前等級 Lv.{displayLevel}</span>
+                        <button
+                          className="text-xs bg-purple-100 text-purple-700 border border-purple-300 rounded px-2 py-1 hover:bg-purple-200 transition-colors"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            buyTool(key, { upgrade: true });
+                          }}
+                        >
+                          升級 ${nextUpgradeCost}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+            <button onClick={() => setShowToolShop(false)}
+                    className="mt-4 w-full bg-gray-500 hover:bg-gray-600 text-white py-2 px-4 rounded transition-colors">
+              關閉
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* 農務用品商店 */}
+      {showSupplyShop && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
+            <h2 className="text-xl font-bold mb-4">農務用品商店</h2>
+            <div className="space-y-4">
+              {Object.entries(FARM_SUPPLIES).map(([key, supply]) => (
+                <div key={key} className="border rounded-lg p-4 bg-white/95 shadow-sm">
+                  <div className="flex justify-between items-start">
                     <div>
-                      <div className="font-semibold">{tool.name}</div>
-                      <div className="text-sm text-gray-600">
-                        節省體力: {tool.energyReduction}
-                      </div>
-                      <div className="text-sm text-gray-600">
-                        速度加成: {Math.round(tool.speedBoost * 100)}%
-                      </div>
+                      <div className="text-2xl">{supply.emoji}</div>
+                      <div className="font-semibold mt-1">{supply.name}</div>
+                      <div className="text-sm text-gray-600 mt-1 leading-snug">{supply.description}</div>
                     </div>
-                    <div className="text-right">
-                      <div className={`font-bold ${tools === key ? 'text-green-600' : 'text-blue-600'}`}>
-                        {tools === key ? '已擁有' : tool.price === 0 ? '免費' : `${tool.price}`}
-                      </div>
-                    </div>
+                    <div className="text-green-600 font-bold">${supply.price}</div>
+                  </div>
+                  <div className="flex gap-2 mt-3">
+                    {[1, 3, 5].map(amount => (
+                      <button
+                        key={amount}
+                        onClick={() => buySupply(key, amount)}
+                        className="flex-1 text-xs bg-teal-500/10 text-teal-700 border border-teal-200 hover:border-teal-400 rounded py-1 transition-colors"
+                      >
+                        購買 {amount}
+                      </button>
+                    ))}
                   </div>
                 </div>
               ))}
             </div>
-            <button onClick={() => setShowToolShop(false)}
+            <button onClick={() => setShowSupplyShop(false)}
                     className="mt-4 w-full bg-gray-500 hover:bg-gray-600 text-white py-2 px-4 rounded transition-colors">
               關閉
             </button>
@@ -1071,6 +2672,103 @@ const FarmGame = () => {
                 {currentNPC.dialogue[Math.floor(Math.random() * currentNPC.dialogue.length)]}
               </p>
             </div>
+            {currentNPC.quests && currentNPC.quests.length > 0 && (
+              <div className="mb-4 space-y-3">
+                <h3 className="text-sm font-semibold text-gray-700">可進行的任務</h3>
+                {currentNPC.quests.map(quest => {
+                  const log = questLog[quest.id] || null;
+                  const status = log?.status ?? 'available';
+                  const required = quest.count ?? 0;
+                  const inventoryCount = quest.type === 'deliver' ? (inventory?.[quest.target] ?? 0) : 0;
+                  const progress = quest.type === 'deliver'
+                    ? Math.min(required, inventoryCount)
+                    : Math.min(required, log?.progress ?? 0);
+                  const canDeliver = quest.type === 'deliver' && status === 'accepted' && inventoryCount >= required;
+                  const canClaim = status === 'ready';
+
+                  let badgeClass = 'bg-yellow-100 text-yellow-700';
+                  let statusLabel = '可接取';
+                  if (status === 'accepted') {
+                    if (canDeliver) {
+                      badgeClass = 'bg-green-100 text-green-700';
+                      statusLabel = '可交付';
+                    } else {
+                      badgeClass = 'bg-blue-100 text-blue-600';
+                      statusLabel = '進行中';
+                    }
+                  } else if (status === 'ready') {
+                    badgeClass = 'bg-green-100 text-green-700';
+                    statusLabel = '可領取';
+                  } else if (status === 'completed') {
+                    badgeClass = 'bg-gray-200 text-gray-600';
+                    statusLabel = '已完成';
+                  }
+
+                  const targetLabel = questManager.getQuestTargetLabel(quest);
+
+                  return (
+                    <div key={quest.id} className="border border-gray-200 rounded-lg p-3 bg-gray-50">
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <p className="text-sm font-semibold text-gray-800 leading-snug">{quest.description}</p>
+                          <p className="text-xs text-gray-600 mt-1">獎勵 ${quest.reward}</p>
+                          {required > 0 && (
+                            <p className="text-xs text-gray-500">需求：{targetLabel} x{required}</p>
+                          )}
+                          {required > 0 && (
+                            <p className="text-xs text-gray-500">
+                              {quest.type === 'deliver'
+                                ? `庫存 ${inventoryCount}/${required}`
+                                : `進度 ${progress}/${required}`}
+                            </p>
+                          )}
+                        </div>
+                        <span className={`text-[11px] px-2 py-1 rounded-full ${badgeClass}`}>{statusLabel}</span>
+                      </div>
+                      <div className="mt-2 flex justify-end gap-2">
+                        {status === 'available' && (
+                          <button
+                            onClick={() => acceptQuest(quest.id)}
+                            className="text-xs bg-blue-500 text-white px-3 py-1 rounded hover:bg-blue-600 transition-colors"
+                          >
+                            接受任務
+                          </button>
+                        )}
+                        {quest.type === 'deliver' && status === 'accepted' && (
+                          <button
+                            onClick={() => deliverQuest(quest.id)}
+                            disabled={!canDeliver}
+                            className={`text-xs px-3 py-1 rounded transition-colors ${canDeliver
+                              ? 'bg-rose-500 text-white hover:bg-rose-600'
+                              : 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                            }`}
+                          >
+                            立即交付
+                          </button>
+                        )}
+                        {quest.type === 'deliver' && status === 'completed' && (
+                          <span className="text-xs text-gray-500">感謝你的幫忙！</span>
+                        )}
+                        {quest.type !== 'deliver' && canClaim && (
+                          <button
+                            onClick={() => claimQuestReward(quest.id)}
+                            className="text-xs bg-emerald-500 text-white px-3 py-1 rounded hover:bg-emerald-600 transition-colors"
+                          >
+                            領取獎勵
+                          </button>
+                        )}
+                        {quest.type !== 'deliver' && status === 'accepted' && !canClaim && (
+                          <span className="text-xs text-gray-500">努力完成目標中…</span>
+                        )}
+                        {quest.type !== 'deliver' && status === 'completed' && (
+                          <span className="text-xs text-gray-500">任務已完成！</span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
             <button onClick={() => setShowNPCDialog(false)}
                     className="w-full bg-blue-500 hover:bg-blue-600 text-white py-2 px-4 rounded transition-colors">
               結束對話
@@ -1111,7 +2809,7 @@ const FarmGame = () => {
               </div>
               <div className="flex justify-between">
                 <span>當前工具:</span>
-                <span className="font-bold">{TOOLS[tools].name}</span>
+                <span className="font-bold">{effectiveToolStats.base.name} Lv.{effectiveToolStats.displayLevel}</span>
               </div>
             </div>
             <div className="mt-4 pt-4 border-t">
