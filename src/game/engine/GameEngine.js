@@ -250,6 +250,12 @@ export class GameEngine {
     return `seed_${seedType}`;
   }
 
+  hasValidCrop(plot) {
+    if (!plot) return false;
+    const cropKey = plot.crop;
+    return Boolean(cropKey && CROPS[cropKey]);
+  }
+
   prepareSeed(seedType) {
     const crop = CROPS[seedType];
     if (!crop) {
@@ -482,7 +488,7 @@ export class GameEngine {
         return true;
       }
 
-      if (plot.crop && plot.ready) {
+      if (this.hasValidCrop(plot) && plot.ready) {
         this.notify('作物已成熟，無需再施肥！', { type: 'info' });
         return true;
       }
@@ -498,7 +504,7 @@ export class GameEngine {
     }
 
     if (selectedSupply === 'pesticide') {
-      if (!plot.pest) {
+      if (!this.hasValidCrop(plot) || !plot.pest) {
         this.notify('這塊土地沒有害蟲。', { type: 'info' });
         return true;
       }
@@ -529,7 +535,7 @@ export class GameEngine {
     }
 
     const targetPlot = farmList[targetIndex];
-    if (targetPlot.crop) {
+    if (this.hasValidCrop(targetPlot)) {
       this.notify('這塊土地已經有作物了！', { type: 'info' });
       return;
     }
@@ -637,7 +643,7 @@ export class GameEngine {
   harvestCrop(plotId) {
     const { farm, marketPrices, buildings, season } = this.state;
     const plot = farm.find(p => p.id === plotId);
-    if (!plot || !plot.ready) return;
+    if (!plot || !plot.ready || !this.hasValidCrop(plot)) return;
 
     const crop = plot.crop;
     const basePrice = (marketPrices && marketPrices[crop]) || CROPS[crop].sellPrice;
@@ -687,7 +693,7 @@ export class GameEngine {
     }
 
     this.setters.setFarm(prev => prev.map(plot =>
-      plot.id === plotId && plot.crop && !plot.watered
+      plot.id === plotId && this.hasValidCrop(plot) && !plot.watered
         ? { ...plot, watered: true }
         : plot
     ));

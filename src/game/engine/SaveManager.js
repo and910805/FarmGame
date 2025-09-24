@@ -204,17 +204,21 @@ export class SaveManager {
       this.setters.setToolLevels(levels);
     }
     const sanitizedFarm = Array.isArray(gameState.farm)
-      ? gameState.farm.map((plot, index) => ({
-          id: plot.id ?? index,
-          crop: plot.crop ?? null,
-          plantTime: plot.plantTime ?? null,
-          watered: plot.crop ? Boolean(plot.watered) : false,
-          fertilized: Boolean(plot.fertilized),
-          greenhouse: Boolean(plot.greenhouse),
-          pest: Boolean(plot.pest),
-          pestDays: plot.pest ? (plot.pestDays ?? 1) : 0,
-          ready: plot.crop ? Boolean(plot.ready) : false,
-        }))
+      ? gameState.farm.map((plot, index) => {
+          const cropKey = typeof plot?.crop === 'string' ? plot.crop.trim() : null;
+          const hasValidCrop = Boolean(cropKey && CROPS[cropKey]);
+          return {
+            id: plot?.id ?? index,
+            crop: hasValidCrop ? cropKey : null,
+            plantTime: hasValidCrop && plot?.plantTime ? plot.plantTime : null,
+            watered: hasValidCrop ? Boolean(plot?.watered) : false,
+            fertilized: hasValidCrop ? Boolean(plot?.fertilized) : false,
+            greenhouse: Boolean(plot?.greenhouse),
+            pest: hasValidCrop ? Boolean(plot?.pest) : false,
+            pestDays: hasValidCrop && plot?.pest ? (plot?.pestDays ?? 1) : 0,
+            ready: hasValidCrop ? Boolean(plot?.ready) : false,
+          };
+        })
       : createDefaultFarm();
 
     const minPlots = Math.max(BASE_FARM_PLOTS, sanitizedFarm.length);
