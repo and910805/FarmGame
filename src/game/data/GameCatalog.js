@@ -49,7 +49,17 @@ class Building extends BaseEntity {
 class Tool extends BaseEntity {
   constructor(
     key,
-    { name, energyReduction, speedBoost, price, upgradeCost = null, speedUpgrade = 0, energyUpgrade = 0, repeatableUpgrade = false }
+    {
+      name,
+      energyReduction,
+      speedBoost,
+      price,
+      upgradeCost = null,
+      speedUpgrade = 0,
+      energyUpgrade = 0,
+      repeatableUpgrade = false,
+      upgradeIncrement = 0,
+    }
   ) {
     super(key);
     this.name = name;
@@ -60,6 +70,7 @@ class Tool extends BaseEntity {
     this.speedUpgrade = speedUpgrade;
     this.energyUpgrade = energyUpgrade;
     this.repeatableUpgrade = repeatableUpgrade;
+    this.upgradeIncrement = upgradeIncrement;
   }
 }
 
@@ -305,6 +316,7 @@ class GameCatalog {
         upgradeCost: 2500,
         speedUpgrade: 0.15,
         repeatableUpgrade: true,
+        upgradeIncrement: 1000,
       }),
     };
 

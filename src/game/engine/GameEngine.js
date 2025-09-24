@@ -229,6 +229,20 @@ export class GameEngine {
     return Math.max(0, Math.floor(raw));
   }
 
+  getToolUpgradeCost(toolKey = this.state.tools, upgradesCompleted = this.getToolUpgradeLevel(toolKey)) {
+    const tool = TOOLS[toolKey];
+    if (!tool || !tool.upgradeCost) {
+      return null;
+    }
+
+    const baseCost = Number(tool.upgradeCost) || 0;
+    const increment = Number(tool.upgradeIncrement) || 0;
+    const timesUpgraded = Math.max(0, upgradesCompleted);
+    const scaledCost = baseCost + (increment * timesUpgraded);
+
+    return Math.max(0, Math.floor(scaledCost));
+  }
+
   getEffectiveToolStats(toolKey = this.state.tools) {
     const baseTool = TOOLS[toolKey] || TOOLS.basic;
     const level = this.getToolUpgradeLevel(toolKey);
@@ -966,14 +980,14 @@ export class GameEngine {
 
     if (ownedSet.has(toolType)) {
       if (wantsUpgrade) {
-        if (!tool.upgradeCost) {
+        const currentLevel = this.getToolUpgradeLevel(toolType);
+        const cost = this.getToolUpgradeCost(toolType, currentLevel);
+        if (cost === null) {
           this.notify('這項工具無法再升級。', { type: 'info' });
           return;
         }
 
-        const currentLevel = this.getToolUpgradeLevel(toolType);
         const nextLevel = currentLevel + 1;
-        const cost = tool.upgradeCost;
         if (money < cost) {
           this.notify('金錢不足，暫時無法升級工具。', { type: 'error' });
           return;
@@ -983,15 +997,24 @@ export class GameEngine {
         const nextEnergy = (tool.energyReduction || 0) + (tool.energyUpgrade || 0) * nextLevel;
 
         this.setters.setMoney(prev => prev - cost);
+        const updateLevels = (previousLevels = {}) => {
+          const safePrev = previousLevels && typeof previousLevels === 'object' ? previousLevels : {};
+          const current = safePrev[toolType] || 0;
+          const nextLevels = { ...safePrev, [toolType]: current + 1 };
+          this.stateRef.current.toolLevels = nextLevels;
+          return nextLevels;
+        };
+
         if (typeof this.setters.setToolLevels === 'function') {
-          this.setters.setToolLevels(prev => {
-            const previous = prev && typeof prev === 'object' ? prev : {};
-            const current = previous[toolType] || 0;
-            return { ...previous, [toolType]: current + 1 };
-          });
+          this.setters.setToolLevels(prev => updateLevels(prev));
+        } else {
+          updateLevels(this.stateRef.current.toolLevels);
         }
         this.setters.setTools(toolType);
-        this.notify(`升級 ${tool.name} 至 Lv.${nextLevel + 1}！速度提升至 ${Math.round(nextSpeed * 100)}%，體力節省 ${Math.round(nextEnergy)}。`, { type: 'success' });
+        this.notify(
+          `升級 ${tool.name} 至 Lv.${nextLevel + 1}！速度提升至 ${Math.round(nextSpeed * 100)}%，體力節省 ${Math.round(nextEnergy)}。`,
+          { type: 'success' }
+        );
         return;
       }
 
@@ -1030,10 +1053,20 @@ export class GameEngine {
       this.setters.setToolLevels(prev => {
         const previous = prev && typeof prev === 'object' ? prev : {};
         if (toolType in previous) {
+          this.stateRef.current.toolLevels = previous;
           return previous;
         }
-        return { ...previous, [toolType]: 0 };
+        const nextLevels = { ...previous, [toolType]: 0 };
+        this.stateRef.current.toolLevels = nextLevels;
+        return nextLevels;
       });
+    } else {
+      const prevLevels = this.stateRef.current.toolLevels && typeof this.stateRef.current.toolLevels === 'object'
+        ? this.stateRef.current.toolLevels
+        : {};
+      if (!(toolType in prevLevels)) {
+        this.stateRef.current.toolLevels = { ...prevLevels, [toolType]: 0 };
+      }
     }
     this.setters.setShowToolShop(false);
     this.notify(`購買並裝備 ${tool.name}！`, { type: 'success' });

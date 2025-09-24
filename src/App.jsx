@@ -2521,8 +2521,8 @@ const FarmGame = () => {
                 const displayLevel = ownedLevel + 1;
                 const displaySpeed = (tool.speedBoost || 1) + (tool.speedUpgrade || 0) * ownedLevel;
                 const displayEnergy = (tool.energyReduction || 0) + (tool.energyUpgrade || 0) * ownedLevel;
-                const nextUpgradeCost = tool.upgradeCost;
-                const canUpgrade = isOwned && Boolean(nextUpgradeCost);
+                const nextUpgradeCost = gameEngine.getToolUpgradeCost(key, ownedLevel);
+                const canUpgrade = isOwned && nextUpgradeCost !== null;
                 const cardClass = isActive
                   ? 'bg-green-100 border-green-400'
                   : isOwned
