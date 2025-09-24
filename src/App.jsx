@@ -1221,8 +1221,8 @@ const FarmGame = () => {
     gameEngine.buyBuilding(buildingType);
   }, [gameEngine]);
 
-  const buyTool = useCallback((toolType) => {
-    gameEngine.buyTool(toolType);
+  const buyTool = useCallback((toolType, options = {}) => {
+    gameEngine.buyTool(toolType, options);
   }, [gameEngine]);
 
   const slaughterAnimal = useCallback((animalId) => {
@@ -2576,7 +2576,7 @@ const FarmGame = () => {
                             buyTool(key, { upgrade: true });
                           }}
                         >
-                          升級 ${nextUpgradeCost}
+                          {`升級 $${nextUpgradeCost}`}
                         </button>
                       </div>
                     )}
