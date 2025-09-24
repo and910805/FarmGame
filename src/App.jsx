@@ -2364,7 +2364,7 @@ const FarmGame = () => {
                       倉庫種子: {inventory[`seed_${selectedSeed}`] || 0} 包
                     </div>
                     <div className="text-xs text-gray-500">
-                      無庫存時植入需花費 ${marketPrices[selectedSeed] || CROPS[selectedSeed].price}
+                      無庫存時植入需花費 ${CROPS[selectedSeed].price}
                     </div>
                   </div>
                 </div>
@@ -2476,7 +2476,8 @@ const FarmGame = () => {
             <h2 className="text-xl font-bold mb-4">種子商店</h2>
             <div className="grid grid-cols-3 gap-4">
               {Object.entries(CROPS).map(([key, crop]) => {
-                const price = marketPrices[key] || crop.price;
+                const seedCost = crop.price;
+                const marketValue = marketPrices[key] || crop.sellPrice;
                 const seedKey = `seed_${key}`;
                 const storedSeeds = inventory[seedKey] || 0;
                 const seasonEntries = Object.entries(crop.seasonBonus || {});
@@ -2493,9 +2494,10 @@ const FarmGame = () => {
                     <div className="text-center space-y-1">
                       <div className="text-3xl">{crop.emoji}</div>
                       <div className="font-semibold">{crop.name}</div>
-                      <div className="text-green-600 font-bold">${price}</div>
+                      <div className="text-green-600 font-bold">種子 ${seedCost}</div>
                       <div className="text-xs text-gray-500">成長: {crop.growTime}分鐘</div>
                       <div className="text-xs text-blue-600">基礎售價: ${crop.sellPrice}</div>
+                      <div className="text-xs text-emerald-600">今日市價: ${marketValue}</div>
                       <div className="text-xs text-amber-600">種子庫存: {storedSeeds} 包</div>
                       {favorableSeasons.length > 0 && (
                         <div className="text-[11px] text-emerald-600">適合季節：{favorableSeasons.join('、')}</div>

@@ -308,8 +308,8 @@ export class GameEngine {
       return;
     }
 
-    const { money, marketPrices, inventory } = this.state;
-    const price = (marketPrices && marketPrices[seedType]) || crop.price;
+    const { money, inventory } = this.state;
+    const price = crop.price;
     const seedKey = this.getSeedKey(seedType);
     const storedSeeds = inventory?.[seedKey] || 0;
 
@@ -331,8 +331,8 @@ export class GameEngine {
     }
 
     const amount = Math.max(1, Math.floor(quantity));
-    const { money, marketPrices } = this.state;
-    const price = (marketPrices && marketPrices[seedType]) || crop.price;
+    const { money } = this.state;
+    const price = crop.price;
     const totalCost = price * amount;
 
     if (money < totalCost) {
@@ -580,7 +580,7 @@ export class GameEngine {
   }
 
   plantSeed(plotId) {
-    const { selectedSeed, tools, energy, money, marketPrices, inventory, season, farm } = this.state;
+    const { selectedSeed, tools, energy, money, inventory, season, farm } = this.state;
     if (!selectedSeed) return;
 
     const farmList = Array.isArray(farm) ? farm : [];
@@ -596,7 +596,7 @@ export class GameEngine {
       return;
     }
 
-    const price = (marketPrices && marketPrices[selectedSeed]) || CROPS[selectedSeed].price;
+    const price = CROPS[selectedSeed].price;
     const seedKey = this.getSeedKey(selectedSeed);
     const storedSeeds = inventory?.[seedKey] || 0;
     const usingStoredSeed = storedSeeds > 0;
