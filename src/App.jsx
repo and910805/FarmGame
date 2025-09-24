@@ -405,6 +405,46 @@ const FarmGame = () => {
     };
   }, [inventory, gameEngine, animals, buildings, marketPrices, inventorySortMode]);
 
+  const seedStorage = useMemo(() => {
+    const sourceInventory = inventory || {};
+    if (!sourceInventory) {
+      return [];
+    }
+
+    return Object.entries(sourceInventory)
+      .map(([key, count]) => {
+        if (!key.startsWith('seed_')) {
+          return null;
+        }
+        const supplyCount = farmSupplies?.[key] || 0;
+        const totalCount = Math.max(count || 0, supplyCount || 0);
+        if (totalCount <= 0) {
+          return null;
+        }
+        const cropKey = key.replace('seed_', '');
+        const crop = CROPS[cropKey];
+        return {
+          key,
+          cropKey,
+          count: totalCount,
+          name: crop?.name || cropKey,
+          emoji: crop?.emoji || '🌱',
+        };
+      })
+      .filter(Boolean)
+      .sort((a, b) => {
+        if (b.count === a.count) {
+          return a.name.localeCompare(b.name, 'zh-TW');
+        }
+        return b.count - a.count;
+      });
+  }, [inventory, farmSupplies]);
+
+  const hasAnyBaseSupply = useMemo(
+    () => Object.keys(FARM_SUPPLIES).some(key => (farmSupplies?.[key] || 0) > 0),
+    [farmSupplies],
+  );
+
   const buildingEntries = useMemo(() => {
     if (!buildings) {
       return [];
@@ -641,23 +681,29 @@ const FarmGame = () => {
                 sickAnimals.push(animal.name);
               }
 
-              let income = 0;
-              if (canProduce) {
-                if (animalData.product && ANIMAL_PRODUCTS[animalData.product]) {
-                  const productKey = animalData.product;
-                  const baseUnits = 1;
-                  const units = Math.max(1, Math.round(baseUnits * boost * (happiness / 100)));
-                  producedGoods[productKey] = (producedGoods[productKey] || 0) + units;
-                } else {
-                  income = Math.floor(animalData.income * boost * (happiness / 100));
-                }
+            let income = 0;
+            let productReady = Math.max(0, Math.floor(animal.productReady || 0));
+            if (canProduce) {
+              if (animalData.product && ANIMAL_PRODUCTS[animalData.product]) {
+                const productKey = animalData.product;
+                const baseUnits = 1;
+                const units = Math.max(1, Math.round(baseUnits * boost * (happiness / 100)));
+                productReady += units;
+                producedGoods[productKey] = (producedGoods[productKey] || 0) + units;
+              } else {
+                income = Math.floor(animalData.income * boost * (happiness / 100));
               }
-              totalIncome += income;
+            }
+            totalIncome += income;
 
-              if (!sick && hunger >= 75 && happiness >= 75 && newbornAnimals.length < 3) {
-                const birthChance = 0.12
-                  + (happiness > 90 ? 0.05 : 0)
-                  + (hunger > 90 ? 0.05 : 0);
+            if (!animalData.product) {
+              productReady = 0;
+            }
+
+            if (!sick && hunger >= 75 && happiness >= 75 && newbornAnimals.length < 3) {
+              const birthChance = 0.12
+                + (happiness > 90 ? 0.05 : 0)
+                + (hunger > 90 ? 0.05 : 0);
                 if (Math.random() < birthChance) {
                   typeCounts[animal.type] = (typeCounts[animal.type] || 0) + 1;
                   const baseName = animalData.name;
@@ -671,6 +717,7 @@ const FarmGame = () => {
                     lastFed: Date.now(),
                     sick: false,
                     name: babyName,
+                    productReady: 0,
                   });
                 }
               }
@@ -680,6 +727,7 @@ const FarmGame = () => {
                 happiness,
                 hunger,
                 sick,
+                productReady,
               });
             });
 
@@ -755,21 +803,13 @@ const FarmGame = () => {
           });
 
           if (Object.keys(producedGoods).length > 0) {
-            setInventory(prevInventory => {
-              const nextInventory = { ...prevInventory };
-              Object.entries(producedGoods).forEach(([productKey, amount]) => {
-                nextInventory[productKey] = (nextInventory[productKey] || 0) + amount;
-              });
-              return nextInventory;
-            });
-
             const produceSummary = Object.entries(producedGoods).map(([productKey, amount]) => {
               const product = ANIMAL_PRODUCTS[productKey];
               const label = product ? `${product.emoji} ${product.name}` : productKey;
               return `${label} x${amount}`;
             });
 
-            addNotification(`${produceSummary.join('、')} 入庫！可到庫存出售換現金。`, { type: 'info' });
+            addNotification(`${produceSummary.join('、')} 已可收集，記得到動物欄點擊「收集」！`, { type: 'info' });
           }
 
           const infestedCrops = [];
@@ -1070,6 +1110,10 @@ const FarmGame = () => {
 
   const feedAnimal = useCallback((animalId) => {
     gameEngine.feedAnimal(animalId);
+  }, [gameEngine]);
+
+  const collectAnimalProduct = useCallback((animalId) => {
+    gameEngine.collectAnimalProduct(animalId);
   }, [gameEngine]);
 
   const buySupply = useCallback((supplyType, quantity = 1) => {
@@ -1379,6 +1423,9 @@ const FarmGame = () => {
                     const isHungry = hunger <= 30;
                     const isSick = Boolean(animal.sick);
                     const medicineCount = farmSupplies.medicine || 0;
+                    const productInfo = animalData.product ? ANIMAL_PRODUCTS[animalData.product] : null;
+                    const readyCount = Math.max(0, Math.floor(animal.productReady || 0));
+                    const canCollectProduct = Boolean(productInfo) && readyCount > 0;
                     return (
                       <div key={animal.id}
                            className={`rounded-lg p-3 transition-colors relative border ${
@@ -1422,10 +1469,13 @@ const FarmGame = () => {
                                    style={{ width: `${Math.max(0, Math.min(100, hunger))}%` }}></div>
                             </div>
                           </div>
-                          {animalData.product && ANIMAL_PRODUCTS[animalData.product] ? (
+                          {productInfo ? (
                             <div className="text-xs text-amber-600">
-                              產物：{ANIMAL_PRODUCTS[animalData.product].emoji} {ANIMAL_PRODUCTS[animalData.product].name}
-                              <span className="ml-1 text-[10px] text-amber-500">（入庫可出售）</span>
+                              產物：{productInfo.emoji} {productInfo.name}
+                              {canCollectProduct && (
+                                <span className="ml-1 font-semibold text-amber-700">可收集 {readyCount}</span>
+                              )}
+                              <span className="ml-1 text-[10px] text-amber-500">（收集後可出售）</span>
                             </div>
                           ) : (
                             <div className="text-xs text-green-600">
@@ -1442,6 +1492,14 @@ const FarmGame = () => {
                           </button>
                           {isHungry && (
                             <div className="text-xs text-orange-600">肚子餓扁了，快餵我！</div>
+                          )}
+                          {canCollectProduct && (
+                            <button
+                              onClick={() => collectAnimalProduct(animal.id)}
+                              className="w-full text-xs font-semibold py-1 rounded transition-colors bg-amber-400 hover:bg-amber-500 text-amber-900 mt-2"
+                            >
+                              收集 {productInfo?.name || '產物'} (+{readyCount})
+                            </button>
                           )}
                           {isSick && (
                             <div className="mt-2 space-y-1">
@@ -1949,6 +2007,34 @@ const FarmGame = () => {
                   );
                 })}
               </div>
+              {seedStorage.length > 0 && (
+                <div className="mt-4 border-t border-teal-200 pt-3">
+                  <h4 className="text-sm font-semibold text-teal-700 mb-2">種子倉庫</h4>
+                  <div className="space-y-2">
+                    {seedStorage.map(seed => {
+                      const isSelected = selectedSeed === seed.cropKey;
+                      return (
+                        <button
+                          key={seed.key}
+                          onClick={() => prepareSeed(seed.cropKey)}
+                          className={`w-full flex items-center justify-between text-sm border rounded-lg px-3 py-2 transition-colors ${
+                            isSelected ? 'border-amber-500 bg-amber-50 text-amber-700' : 'border-amber-200 hover:border-amber-400'
+                          }`}
+                        >
+                          <span className="flex items-center gap-2">
+                            <span>{seed.emoji}</span>
+                            <span className="font-semibold">{seed.name} 種子</span>
+                          </span>
+                          <span className="text-xs text-gray-600">庫存 {seed.count} 包</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <p className="text-[11px] text-amber-600 mt-2">
+                    點擊即可帶著種子外出種植；庫存不足時系統會改為現金購買。
+                  </p>
+                </div>
+              )}
               {selectedSupply && FARM_SUPPLIES[selectedSupply] && (
                 <div className="mt-2 space-y-1">
                   <p className="text-xs text-teal-700">目前選擇：{FARM_SUPPLIES[selectedSupply].name}</p>
@@ -1960,7 +2046,7 @@ const FarmGame = () => {
                   </button>
                 </div>
               )}
-              {Object.values(farmSupplies).every(count => count === 0) && (
+              {!hasAnyBaseSupply && (
                 <p className="text-xs text-gray-500 mt-2">沒有庫存？到農務用品購買吧！</p>
               )}
             </div>

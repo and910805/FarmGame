@@ -169,7 +169,8 @@ export class SaveManager {
     this.setters.setSeason(gameState.season);
     this.setters.setWeather(gameState.weather);
     this.setters.setWeatherDuration(gameState.weatherDuration || 5);
-    this.setters.setInventory(withInventoryDefaults(gameState.inventory));
+    const normalizedInventory = withInventoryDefaults(gameState.inventory);
+    this.setters.setInventory(normalizedInventory);
     this.setters.setQuestLog(gameState.questLog ? { ...gameState.questLog } : {});
     if (typeof this.setters.setDynamicQuests === 'function') {
       const dynamic = gameState.dynamicQuests && typeof gameState.dynamicQuests === 'object'
@@ -276,13 +277,20 @@ export class SaveManager {
     }
 
     this.setters.setFarm(normalizedFarm);
-    this.setters.setFarmSupplies(gameState.farmSupplies || createDefaultSupplies());
+    const baseSupplies = { ...createDefaultSupplies(), ...(gameState.farmSupplies || {}) };
+    Object.entries(normalizedInventory).forEach(([key, value]) => {
+      if (key.startsWith('seed_')) {
+        baseSupplies[key] = value;
+      }
+    });
+    this.setters.setFarmSupplies(baseSupplies);
     const sanitizedAnimals = Array.isArray(gameState.animals)
       ? gameState.animals.map(animal => ({
           ...animal,
           happiness: animal.happiness ?? ANIMALS[animal.type]?.happiness ?? 50,
           hunger: animal.hunger ?? 60,
           sick: animal.sick ?? false,
+          productReady: Math.max(0, Math.floor(animal.productReady || 0)),
         }))
       : [];
     this.setters.setAnimals(sanitizedAnimals);

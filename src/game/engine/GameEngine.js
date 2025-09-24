@@ -260,9 +260,16 @@ export class GameEngine {
       ...prev,
       [seedKey]: (prev?.[seedKey] || 0) + amount,
     }));
+    if (typeof this.setters.setFarmSupplies === 'function') {
+      this.setters.setFarmSupplies(prev => {
+        const previous = prev || {};
+        const current = previous[seedKey] || 0;
+        return { ...previous, [seedKey]: current + amount };
+      });
+    }
     this.setters.setSelectedSupply(null);
     this.setters.setSelectedSeed(seedType);
-    this.notify(`購買了 ${amount} 包${crop.name}種子，已存入倉庫並可直接種植。`, { type: 'success' });
+    this.notify(`購買了 ${amount} 包${crop.name}種子，已存入農務用品區，可隨時備用。`, { type: 'success' });
   }
 
   buySeed(seedType, options) {
@@ -509,6 +516,13 @@ export class GameEngine {
         ...prev,
         [seedKey]: Math.max(0, (prev?.[seedKey] || 0) - 1),
       }));
+      if (typeof this.setters.setFarmSupplies === 'function') {
+        this.setters.setFarmSupplies(prev => {
+          const previous = prev || {};
+          const current = previous[seedKey] || 0;
+          return { ...previous, [seedKey]: Math.max(0, current - 1) };
+        });
+      }
     } else {
       remainingMoney = money - price;
       this.setters.setMoney(prev => prev - price);
@@ -644,6 +658,7 @@ export class GameEngine {
         lastFed: Date.now(),
         sick: false,
         name: `${animal.name}${baseIndex + index + 1}`,
+        productReady: 0,
       }));
       return [...prevList, ...additions];
     });
@@ -670,6 +685,19 @@ export class GameEngine {
     if (!butcher || !butcher.product) {
       this.notify('這類動物無法進行屠宰。', { type: 'warning' });
       return;
+    }
+
+    if (animalData.product) {
+      const readyAmount = Math.max(0, Math.floor(animal.productReady || 0));
+      if (readyAmount > 0) {
+        const readyProduct = ANIMAL_PRODUCTS[animalData.product];
+        this.setters.setInventory(prev => ({
+          ...prev,
+          [animalData.product]: (prev?.[animalData.product] || 0) + readyAmount,
+        }));
+        const readyLabel = readyProduct ? readyProduct.name : '產物';
+        this.notify(`在處理 ${animal.name} 前，先收集了 ${readyLabel} x${readyAmount}。`, { type: 'info' });
+      }
     }
 
     const product = ANIMAL_PRODUCTS[butcher.product];
@@ -931,6 +959,14 @@ export class GameEngine {
       [itemKey]: Math.max(0, (prev?.[itemKey] || 0) - amountToSell),
     }));
 
+    if (itemKey.startsWith('seed_') && typeof this.setters.setFarmSupplies === 'function') {
+      this.setters.setFarmSupplies(prev => {
+        const previous = prev || {};
+        const current = previous[itemKey] || 0;
+        return { ...previous, [itemKey]: Math.max(0, current - amountToSell) };
+      });
+    }
+
     this.setters.setMoney(prev => prev + saleValue);
 
     if (itemKey.startsWith('seed_')) {
@@ -1015,6 +1051,47 @@ export class GameEngine {
 
     this.consumeSupply('medicine', { keepSelection: medicineCount > 1 });
     this.notify(`已替 ${animal.name} 使用營養劑，狀況好多了！`, { type: 'success' });
+  }
+
+  collectAnimalProduct(animalId) {
+    const { animals = [] } = this.state;
+    if (!Array.isArray(animals) || animals.length === 0) {
+      this.notify('目前沒有動物可以收集產物。', { type: 'info' });
+      return;
+    }
+
+    const animal = animals.find(entry => entry.id === animalId);
+    if (!animal) {
+      this.notify('找不到這隻動物。', { type: 'error' });
+      return;
+    }
+
+    const animalData = ANIMALS[animal.type];
+    if (!animalData || !animalData.product) {
+      this.notify('這隻動物不會產出可收集的物品。', { type: 'info' });
+      return;
+    }
+
+    const readyAmount = Math.max(0, Math.floor(animal.productReady || 0));
+    if (readyAmount <= 0) {
+      this.notify('目前沒有可以收集的產物。', { type: 'info' });
+      return;
+    }
+
+    const product = ANIMAL_PRODUCTS[animalData.product];
+    this.setters.setAnimals(prev => prev.map(entry => (
+      entry.id === animalId
+        ? { ...entry, productReady: 0, lastCollected: Date.now() }
+        : entry
+    )));
+
+    this.setters.setInventory(prev => ({
+      ...prev,
+      [animalData.product]: (prev?.[animalData.product] || 0) + readyAmount,
+    }));
+
+    const label = product ? `${product.emoji} ${product.name}` : '產物';
+    this.notify(`收集了 ${label} x${readyAmount}，已送入倉庫。`, { type: 'success' });
   }
 }
 
