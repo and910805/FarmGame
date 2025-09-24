@@ -290,16 +290,27 @@ export class GameEngine {
     }
 
     const seedKey = this.getSeedKey(seedType);
-    this.setters.setMoney(prev => prev - totalCost);
-    this.setters.setInventory(prev => ({
-      ...prev,
-      [seedKey]: (prev?.[seedKey] || 0) + amount,
-    }));
+    this.setters.setMoney(prev => {
+      const updated = prev - totalCost;
+      this.stateRef.current.money = updated;
+      return updated;
+    });
+    this.setters.setInventory(prev => {
+      const base = prev && typeof prev === 'object' ? prev : {};
+      const updated = {
+        ...base,
+        [seedKey]: (base[seedKey] || 0) + amount,
+      };
+      this.stateRef.current.inventory = updated;
+      return updated;
+    });
     if (typeof this.setters.setFarmSupplies === 'function') {
       this.setters.setFarmSupplies(prev => {
         const previous = prev || {};
         const current = previous[seedKey] || 0;
-        return { ...previous, [seedKey]: current + amount };
+        const updated = { ...previous, [seedKey]: current + amount };
+        this.stateRef.current.farmSupplies = updated;
+        return updated;
       });
     }
     this.setters.setSelectedSupply(null);
@@ -510,12 +521,24 @@ export class GameEngine {
     const { selectedSeed, tools, energy, money, marketPrices, inventory, season, farm } = this.state;
     if (!selectedSeed) return;
 
+    const farmList = Array.isArray(farm) ? farm : [];
+    const targetIndex = farmList.findIndex(plot => plot.id === plotId);
+    if (targetIndex === -1) {
+      this.notify('找不到這塊土地。', { type: 'error' });
+      return;
+    }
+
+    const targetPlot = farmList[targetIndex];
+    if (targetPlot.crop) {
+      this.notify('這塊土地已經有作物了！', { type: 'info' });
+      return;
+    }
+
     const price = (marketPrices && marketPrices[selectedSeed]) || CROPS[selectedSeed].price;
     const seedKey = this.getSeedKey(selectedSeed);
     const storedSeeds = inventory?.[seedKey] || 0;
     const usingStoredSeed = storedSeeds > 0;
-    const existingPlot = Array.isArray(farm) ? farm.find(plot => plot.id === plotId) : null;
-    const isGreenhousePlot = existingPlot?.greenhouse;
+    const isGreenhousePlot = targetPlot?.greenhouse;
 
     if (!usingStoredSeed && money < price) {
       this.notify('金錢不足，無法種植！', { type: 'error' });
@@ -530,34 +553,31 @@ export class GameEngine {
       return;
     }
 
-    let planted = false;
-    this.setters.setFarm(prev => prev.map(plot => {
-      if (plot.id === plotId && !plot.crop) {
-        planted = true;
-        return { ...plot, crop: selectedSeed, plantTime: Date.now(), watered: false, ready: false, pest: false, pestDays: 0 };
+    this.setters.setFarm(prev => {
+      if (!Array.isArray(prev)) {
+        return prev;
       }
-      return plot;
-    }));
-
-    if (!planted) {
-      this.notify('這塊土地已經有作物了！', { type: 'info' });
-      return;
-    }
+      const nextFarm = prev.map(plot => (
+        plot.id === plotId
+          ? { ...plot, crop: selectedSeed, plantTime: Date.now(), watered: false, ready: false, pest: false, pestDays: 0 }
+          : plot
+      ));
+      this.stateRef.current.farm = nextFarm;
+      return nextFarm;
+    });
 
     let remainingSeeds = storedSeeds;
     let remainingMoney = money;
     if (usingStoredSeed) {
       let nextSeedCount = Math.max(0, storedSeeds - 1);
       this.setters.setInventory(prev => {
-        const previous = prev?.[seedKey] || 0;
-        const updated = Math.max(0, previous - 1);
-        nextSeedCount = updated;
-        return { ...prev, [seedKey]: updated };
+        const base = prev && typeof prev === 'object' ? prev : {};
+        const updatedCount = Math.max(0, (base[seedKey] || 0) - 1);
+        nextSeedCount = updatedCount;
+        const updatedInventory = { ...base, [seedKey]: updatedCount };
+        this.stateRef.current.inventory = updatedInventory;
+        return updatedInventory;
       });
-
-      const currentInventory = { ...(this.stateRef.current.inventory || {}) };
-      currentInventory[seedKey] = nextSeedCount;
-      this.stateRef.current.inventory = currentInventory;
       remainingSeeds = nextSeedCount;
 
       if (typeof this.setters.setFarmSupplies === 'function') {
@@ -567,24 +587,18 @@ export class GameEngine {
           const current = previous[seedKey] || 0;
           const updated = Math.max(0, current - 1);
           nextSupplyCount = updated;
-          return { ...previous, [seedKey]: updated };
+          const updatedSupplies = { ...previous, [seedKey]: updated };
+          this.stateRef.current.farmSupplies = updatedSupplies;
+          return updatedSupplies;
         });
-
-        if (nextSupplyCount !== null) {
-          const currentSupplies = { ...(this.stateRef.current.farmSupplies || {}) };
-          currentSupplies[seedKey] = nextSupplyCount;
-          this.stateRef.current.farmSupplies = currentSupplies;
-        }
       }
     } else {
-      let nextMoney = Math.max(0, money - price);
       this.setters.setMoney(prev => {
         const updated = Math.max(0, prev - price);
-        nextMoney = updated;
+        remainingMoney = updated;
+        this.stateRef.current.money = updated;
         return updated;
       });
-      remainingMoney = nextMoney;
-      this.stateRef.current.money = nextMoney;
     }
 
     let nextEnergy = Math.max(0, energy - energyCost);
