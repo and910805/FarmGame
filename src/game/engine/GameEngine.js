@@ -260,7 +260,9 @@ export class GameEngine {
       ...prev,
       [seedKey]: (prev?.[seedKey] || 0) + amount,
     }));
-    this.notify(`購買了 ${amount} 包${crop.name}種子，已存入倉庫。`, { type: 'success' });
+    this.setters.setSelectedSupply(null);
+    this.setters.setSelectedSeed(seedType);
+    this.notify(`購買了 ${amount} 包${crop.name}種子，已存入倉庫並可直接種植。`, { type: 'success' });
   }
 
   buySeed(seedType, options) {
@@ -271,23 +273,24 @@ export class GameEngine {
     }
   }
 
-  buySupply(supplyType) {
+  buySupply(supplyType, options = {}) {
     const supply = FARM_SUPPLIES[supplyType];
     if (!supply) return;
 
+    const quantity = Math.max(1, Math.floor(options.quantity ?? 1));
+    const totalCost = supply.price * quantity;
     const { money } = this.state;
-    if (money < supply.price) {
+    if (money < totalCost) {
       this.notify('金錢不足，無法購買！', { type: 'error' });
       return;
     }
 
-    this.setters.setMoney(prev => prev - supply.price);
+    this.setters.setMoney(prev => prev - totalCost);
     this.setters.setFarmSupplies(prev => {
       const previous = prev || {};
-      return { ...previous, [supplyType]: (previous[supplyType] || 0) + 1 };
+      return { ...previous, [supplyType]: (previous[supplyType] || 0) + quantity };
     });
-    this.setters.setShowSupplyShop(false);
-    this.notify(`購買了 ${supply.emoji} ${supply.name}！`, { type: 'success' });
+    this.notify(`購買了 ${quantity} 份${supply.name}！`, { type: 'success' });
   }
 
   expandFarm() {
@@ -498,18 +501,30 @@ export class GameEngine {
       return;
     }
 
+    let remainingSeeds = storedSeeds;
+    let remainingMoney = money;
     if (usingStoredSeed) {
+      remainingSeeds = storedSeeds - 1;
       this.setters.setInventory(prev => ({
         ...prev,
         [seedKey]: Math.max(0, (prev?.[seedKey] || 0) - 1),
       }));
     } else {
+      remainingMoney = money - price;
       this.setters.setMoney(prev => prev - price);
     }
 
     this.setters.setEnergy(prev => Math.max(0, prev - energyCost));
     this.setters.setExperience(prev => prev + 5);
-    this.setters.setSelectedSeed(null);
+
+    const canContinuePlanting = usingStoredSeed
+      ? remainingSeeds > 0
+      : remainingMoney >= price;
+
+    if (!canContinuePlanting) {
+      this.setters.setSelectedSeed(null);
+    }
+
     this.setters.setSelectedSupply(null);
     const crop = CROPS[selectedSeed];
     if (crop?.seasonBonus) {
@@ -546,7 +561,6 @@ export class GameEngine {
 
     const sellPrice = Math.floor(basePrice * bonus);
 
-    this.setters.setMoney(prev => prev + sellPrice);
     this.setters.setInventory(prev => ({
       ...prev,
       [crop]: ((prev && prev[crop]) || 0) + 1,
@@ -567,7 +581,7 @@ export class GameEngine {
         : p
     )));
 
-    this.notify(`收成了 ${CROPS[crop].emoji}！獲得 $${sellPrice}`, { type: 'success' });
+    this.notify(`收成了 ${CROPS[crop].emoji}！已存入倉庫（估值 $${sellPrice}）。`, { type: 'success' });
     this.emitQuestEvent({ type: 'harvest', crop, amount: 1 });
   }
 
@@ -589,7 +603,7 @@ export class GameEngine {
     this.notify('澆水完成！', { type: 'success' });
   }
 
-  buyAnimal(animalType) {
+  buyAnimal(animalType, options = {}) {
     const { money, animals = [], animalCapacity } = this.state;
     const animal = ANIMALS[animalType];
     const requiredShelter = animal.shelter;
@@ -601,27 +615,41 @@ export class GameEngine {
     }
 
     const capacityLimit = Math.max(animalCapacity || BASE_ANIMAL_CAPACITY, BASE_ANIMAL_CAPACITY);
-    if ((animals?.length || 0) >= capacityLimit) {
+    const existingCount = animals?.length || 0;
+    const availableSlots = Math.max(0, capacityLimit - existingCount);
+    if (availableSlots <= 0) {
       this.notify('動物欄位已滿，請先擴建或整理空間。', { type: 'warning' });
       return;
     }
 
-    if (money >= animal.price) {
-      this.setters.setMoney(prev => prev - animal.price);
-      this.setters.setAnimals(prev => [...prev, {
-        id: Date.now(),
+    const requestedQuantity = Math.max(1, Math.floor(options.quantity ?? 1));
+    const affordable = Math.floor(money / animal.price);
+    const purchasable = Math.min(requestedQuantity, availableSlots, affordable);
+
+    if (purchasable <= 0) {
+      this.notify('金錢不足，無法購買！', { type: 'error' });
+      return;
+    }
+
+    this.setters.setMoney(prev => prev - (animal.price * purchasable));
+    this.setters.setAnimals(prev => {
+      const prevList = Array.isArray(prev) ? prev : [];
+      const baseIndex = prevList.filter(a => a.type === animalType).length;
+      const timestamp = Date.now();
+      const additions = Array.from({ length: purchasable }, (_, index) => ({
+        id: timestamp + index,
         type: animalType,
         happiness: animal.happiness,
         hunger: 70,
         lastFed: Date.now(),
         sick: false,
-        name: `${animal.name}${prev.filter(a => a.type === animalType).length + 1}`,
-      }]);
-      this.setters.setShowAnimalShop(false);
-      this.notify(`購買了 ${animal.emoji} ${animal.name}！`, { type: 'success' });
-    } else {
-      this.notify('金錢不足！', { type: 'error' });
-    }
+        name: `${animal.name}${baseIndex + index + 1}`,
+      }));
+      return [...prevList, ...additions];
+    });
+
+    const label = purchasable > 1 ? `${purchasable} 隻${animal.name}` : `${animal.name}`;
+    this.notify(`購買了 ${animal.emoji} ${label}！`, { type: 'success' });
   }
 
   slaughterAnimal(animalId) {

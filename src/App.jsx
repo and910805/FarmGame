@@ -40,6 +40,8 @@ const createInitialInventory = () => {
   return base;
 };
 
+const DYNAMIC_QUEST_SLOTS = 3;
+
 const FarmGame = () => {
   // 基本狀態
   const [money, setMoney] = useState(500);
@@ -76,6 +78,7 @@ const FarmGame = () => {
   });
 
   const [questLog, setQuestLog] = useState({});
+  const [dynamicQuests, setDynamicQuests] = useState({});
 
   const [animals, setAnimals] = useState([]);
   const [animalCapacity, setAnimalCapacity] = useState(BASE_ANIMAL_CAPACITY);
@@ -113,8 +116,15 @@ const FarmGame = () => {
         }
       });
     });
+
+    Object.entries(dynamicQuests || {}).forEach(([questId, quest]) => {
+      if (questId && quest) {
+        map[questId] = quest;
+      }
+    });
+
     return map;
-  }, []);
+  }, [dynamicQuests]);
 
   const getQuestTargetLabel = useCallback((quest) => {
     if (!quest?.target) {
@@ -139,6 +149,133 @@ const FarmGame = () => {
     return quest.target;
   }, []);
 
+  const refreshDynamicQuests = useCallback((currentDay) => {
+    const existingDynamic = stateRef.current.dynamicQuests || {};
+    const existingLog = stateRef.current.questLog || {};
+
+    const preserved = {};
+    Object.entries(existingDynamic).forEach(([id, quest]) => {
+      const status = existingLog?.[id]?.status;
+      if (status === 'accepted' || status === 'ready') {
+        preserved[id] = quest;
+      }
+    });
+
+    const questGivers = ['商會佈告欄', '旅行商人', '鄰村里長', '合作社代表', '冒險者公會'];
+    const deliverTargets = [...Object.keys(CROPS), ...Object.keys(ANIMAL_PRODUCTS)];
+    const harvestTargets = Object.keys(CROPS);
+    const sellTargets = Object.keys(CROPS);
+
+    const randomBetween = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
+    const pickOne = (list) => list[Math.floor(Math.random() * list.length)];
+
+    const usedIds = new Set(Object.keys(preserved));
+    const createQuestId = (slot) => {
+      let attempt = 0;
+      let id;
+      do {
+        id = `daily_${currentDay}_${slot}_${Math.random().toString(36).slice(2, 6)}`;
+        attempt += 1;
+      } while (usedIds.has(id) && attempt < 5);
+      usedIds.add(id);
+      return id;
+    };
+
+    const buildQuest = (slot) => {
+      const giver = pickOne(questGivers);
+      const questTypes = ['deliver', 'harvest', 'sell', 'pestClear'];
+      const type = pickOne(questTypes);
+      const questId = createQuestId(slot);
+
+      if (type === 'deliver' && deliverTargets.length > 0) {
+        const target = pickOne(deliverTargets);
+        const product = ANIMAL_PRODUCTS[target];
+        const crop = CROPS[target];
+        const isProduct = Boolean(product);
+        const label = isProduct
+          ? `${product.emoji} ${product.name}`
+          : `${crop.emoji} ${crop.name}`;
+        const basePrice = isProduct ? product.basePrice : crop.sellPrice;
+        const count = isProduct ? randomBetween(4, 12) : randomBetween(18, 45);
+        const reward = Math.max(150, Math.floor(basePrice * count * (isProduct ? 1.9 : 1.5)));
+        return {
+          id: questId,
+          type: 'deliver',
+          target,
+          count,
+          reward,
+          description: `${giver} 需要 ${count} 份${label}，協助供貨即可獲得酬勞。`,
+          npcName: giver,
+        };
+      }
+
+      if (type === 'harvest' && harvestTargets.length > 0) {
+        const target = pickOne(harvestTargets);
+        const crop = CROPS[target];
+        const count = randomBetween(10, 28);
+        const reward = Math.max(160, Math.floor(crop.sellPrice * count * (1.4 + Math.random() * 0.5)));
+        return {
+          id: questId,
+          type: 'harvest',
+          target,
+          count,
+          reward,
+          description: `${giver} 正準備市集，收成 ${count} 份${crop.emoji} ${crop.name} 就能領取獎金。`,
+          npcName: giver,
+        };
+      }
+
+      if (type === 'sell' && sellTargets.length > 0) {
+        const target = pickOne(sellTargets);
+        const crop = CROPS[target];
+        const count = randomBetween(15, 35);
+        const reward = Math.max(200, Math.floor(crop.sellPrice * count * (1.55 + Math.random() * 0.45)));
+        return {
+          id: questId,
+          type: 'sell',
+          target,
+          count,
+          reward,
+          description: `${giver} 想炒熱 ${crop.emoji} ${crop.name} 的行情，賣出 ${count} 份即可分紅。`,
+          npcName: giver,
+        };
+      }
+
+      const pestCount = randomBetween(3, 6);
+      const reward = randomBetween(180, 320);
+      return {
+        id: questId,
+        type: 'pestClear',
+        count: pestCount,
+        reward,
+        description: `${giver} 報告蟲害，協助處理 ${pestCount} 塊農地的害蟲。`,
+        npcName: giver,
+      };
+    };
+
+    const combined = { ...preserved };
+    let slotIndex = 0;
+    while (Object.keys(combined).length < DYNAMIC_QUEST_SLOTS) {
+      const quest = buildQuest(slotIndex);
+      combined[quest.id] = quest;
+      slotIndex += 1;
+    }
+
+    setDynamicQuests(combined);
+    setQuestLog(prev => {
+      if (!prev) {
+        return prev;
+      }
+      const next = { ...prev };
+      Object.keys(prev).forEach(id => {
+        if (id.startsWith('daily_') && !combined[id]) {
+          delete next[id];
+        }
+      });
+      return next;
+    });
+  }, [setDynamicQuests, setQuestLog, stateRef]);
+
   const notificationCenter = useMemo(() => new NotificationCenter(setNotifications), []);
   const addNotification = useCallback((message, options) => {
     notificationCenter.push(message, options);
@@ -146,6 +283,10 @@ const FarmGame = () => {
   const dismissNotification = useCallback((id) => {
     notificationCenter.dismiss(id);
   }, [notificationCenter]);
+
+  useEffect(() => {
+    refreshDynamicQuests(day);
+  }, [day, refreshDynamicQuests]);
 
   const farmSize = Array.isArray(farm) ? farm.length : 0;
   const nextFarmExpansionCost = useMemo(() => (
@@ -215,6 +356,7 @@ const FarmGame = () => {
     marketView,
     marketListSort,
     inventorySortMode,
+    dynamicQuests,
   };
 
   const saveManager = useMemo(() => new SaveManager({
@@ -253,6 +395,7 @@ const FarmGame = () => {
       setSelectedSupply,
       setShowSupplyShop,
       setPendingGreenhousePlacement,
+      setDynamicQuests,
     },
     notifier: addNotification,
   }), [addNotification]);
@@ -513,6 +656,22 @@ const FarmGame = () => {
         return a.ready ? -1 : 1;
       });
   }, [questLog, questDefinitions, inventory]);
+
+  const availableDynamicQuests = useMemo(() => {
+    if (!dynamicQuests) {
+      return [];
+    }
+
+    return Object.entries(dynamicQuests)
+      .map(([id, quest]) => {
+        const entry = questLog?.[id];
+        if (entry && (entry.status === 'accepted' || entry.status === 'ready')) {
+          return null;
+        }
+        return { id, quest };
+      })
+      .filter(Boolean);
+  }, [dynamicQuests, questLog]);
 
   const marketInsights = useMemo(() => {
     const entries = Object.entries(CROPS).map(([key, crop]) => {
@@ -1273,8 +1432,8 @@ const FarmGame = () => {
     }
   }, [gameEngine]);
 
-  const buyAnimal = useCallback((animalType) => {
-    gameEngine.buyAnimal(animalType);
+  const buyAnimal = useCallback((animalType, quantity = 1) => {
+    gameEngine.buyAnimal(animalType, { quantity });
   }, [gameEngine]);
 
   const buyBuilding = useCallback((buildingType) => {
@@ -1293,8 +1452,8 @@ const FarmGame = () => {
     gameEngine.feedAnimal(animalId);
   }, [gameEngine]);
 
-  const buySupply = useCallback((supplyType) => {
-    gameEngine.buySupply(supplyType);
+  const buySupply = useCallback((supplyType, quantity = 1) => {
+    gameEngine.buySupply(supplyType, { quantity });
   }, [gameEngine]);
 
   const selectSupply = useCallback((supplyType) => {
@@ -1813,6 +1972,42 @@ const FarmGame = () => {
                   目前沒有進行中的任務，去和鄰居聊聊看看是否需要幫忙吧！
                 </p>
               )}
+
+              <div className="mt-4 pt-3 border-t border-rose-100">
+                <h4 className="text-sm font-semibold text-rose-600 mb-2">今日佈告欄任務</h4>
+                {availableDynamicQuests.length > 0 ? (
+                  <div className="space-y-2">
+                    {availableDynamicQuests.map(({ id, quest }) => {
+                      const required = quest.count ?? 0;
+                      const targetLabel = getQuestTargetLabel(quest);
+                      return (
+                        <div key={id} className="border border-rose-100 rounded-lg p-3 bg-white/70">
+                          <div className="flex items-start justify-between gap-2">
+                            <div>
+                              <p className="text-sm font-semibold text-rose-700 leading-snug">{quest.description}</p>
+                              <p className="text-xs text-gray-600 mt-1">獎勵 ${quest.reward}</p>
+                              {required > 0 && targetLabel !== '目標' && (
+                                <p className="text-xs text-gray-500 mt-1">需求：{targetLabel} x{required}</p>
+                              )}
+                            </div>
+                            <span className="text-[11px] px-2 py-1 rounded-full bg-rose-100 text-rose-600">{quest.npcName}</span>
+                          </div>
+                          <div className="mt-2 flex justify-end">
+                            <button
+                              onClick={() => acceptQuest(id)}
+                              className="text-xs font-semibold px-3 py-1 rounded bg-rose-500 text-white hover:bg-rose-600 transition-colors"
+                            >
+                              接受任務
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <p className="text-xs text-gray-500">今日暫無新的佈告欄委託，明天再來看看吧！</p>
+                )}
+              </div>
             </div>
 
             {/* 市場價格 */}
@@ -2347,10 +2542,8 @@ const FarmGame = () => {
             <h2 className="text-xl font-bold mb-4">動物商店</h2>
             <div className="grid grid-cols-2 gap-4">
               {Object.entries(ANIMALS).map(([key, animal]) => (
-                <div key={key} 
-                     className="border rounded-lg p-4 cursor-pointer hover:bg-gray-50 transition-colors"
-                     onClick={() => buyAnimal(key)}>
-                  <div className="text-center">
+                <div key={key} className="border rounded-lg p-4 bg-white/90 shadow-sm">
+                  <div className="text-center space-y-1">
                     <div className="text-3xl mb-2">{animal.emoji}</div>
                     <div className="font-semibold">{animal.name}</div>
                     <div className="text-green-600 font-bold">${animal.price}</div>
@@ -2363,6 +2556,17 @@ const FarmGame = () => {
                     <div className="text-xs text-purple-600">
                       需要: {BUILDINGS[animal.shelter]?.name || '無'}
                     </div>
+                  </div>
+                  <div className="flex gap-2 mt-3">
+                    {[1, 3].map(amount => (
+                      <button
+                        key={amount}
+                        onClick={() => buyAnimal(key, amount)}
+                        className="flex-1 text-xs bg-blue-500/10 text-blue-700 border border-blue-200 hover:border-blue-400 rounded py-1 transition-colors"
+                      >
+                        購買 {amount}
+                      </button>
+                    ))}
                   </div>
                 </div>
               ))}
@@ -2540,9 +2744,7 @@ const FarmGame = () => {
             <h2 className="text-xl font-bold mb-4">農務用品商店</h2>
             <div className="space-y-4">
               {Object.entries(FARM_SUPPLIES).map(([key, supply]) => (
-                <div key={key}
-                     className="border rounded-lg p-4 cursor-pointer hover:bg-teal-50 transition-colors"
-                     onClick={() => buySupply(key)}>
+                <div key={key} className="border rounded-lg p-4 bg-white/95 shadow-sm">
                   <div className="flex justify-between items-start">
                     <div>
                       <div className="text-2xl">{supply.emoji}</div>
@@ -2550,6 +2752,17 @@ const FarmGame = () => {
                       <div className="text-sm text-gray-600 mt-1 leading-snug">{supply.description}</div>
                     </div>
                     <div className="text-green-600 font-bold">${supply.price}</div>
+                  </div>
+                  <div className="flex gap-2 mt-3">
+                    {[1, 3, 5].map(amount => (
+                      <button
+                        key={amount}
+                        onClick={() => buySupply(key, amount)}
+                        className="flex-1 text-xs bg-teal-500/10 text-teal-700 border border-teal-200 hover:border-teal-400 rounded py-1 transition-colors"
+                      >
+                        購買 {amount}
+                      </button>
+                    ))}
                   </div>
                 </div>
               ))}

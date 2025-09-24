@@ -88,6 +88,7 @@ export class SaveManager {
       selectedSupply,
       animalCapacity,
       questLog,
+      dynamicQuests,
       ownedTools,
     } = this.state;
 
@@ -123,6 +124,7 @@ export class SaveManager {
       selectedSupply: selectedSupply || null,
       animalCapacity: Math.max(animalCapacity || BASE_ANIMAL_CAPACITY, BASE_ANIMAL_CAPACITY),
       questLog: questLog || {},
+      dynamicQuests: dynamicQuests || {},
       ownedTools: Array.isArray(ownedTools) ? ownedTools : Array.from(ownedTools || []),
       saveTime: new Date().toISOString(),
       version: '1.1',
@@ -169,6 +171,12 @@ export class SaveManager {
     this.setters.setWeatherDuration(gameState.weatherDuration || 5);
     this.setters.setInventory(withInventoryDefaults(gameState.inventory));
     this.setters.setQuestLog(gameState.questLog ? { ...gameState.questLog } : {});
+    if (typeof this.setters.setDynamicQuests === 'function') {
+      const dynamic = gameState.dynamicQuests && typeof gameState.dynamicQuests === 'object'
+        ? { ...gameState.dynamicQuests }
+        : {};
+      this.setters.setDynamicQuests(dynamic);
+    }
     if (typeof this.setters.setOwnedTools === 'function') {
       const owned = Array.isArray(gameState.ownedTools)
         ? gameState.ownedTools
