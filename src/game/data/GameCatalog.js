@@ -300,6 +300,12 @@ class GameCatalog {
         emoji: '💊',
         description: '治療生病的動物並恢復部分快樂度。',
       }),
+      energyDrink: new Supply('energyDrink', {
+        name: '精力飲料',
+        price: 65,
+        emoji: '🥤',
+        description: '立即恢復大量體力，適合忙碌的一天。',
+      }),
     };
 
     this.tools = {

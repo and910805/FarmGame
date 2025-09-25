@@ -8,6 +8,8 @@ import {
   ANIMAL_CARE_ACTIONS,
   ANIMAL_TRAIT_MAP,
   pickAnimalTraitKey,
+  ENERGY_RESTS_PER_DAY,
+  getEnergyCapacity,
 } from './constants';
 
 const createDefaultInventory = () => {
@@ -54,6 +56,7 @@ const createDefaultSupplies = () => ({
   fertilizer: 0,
   pesticide: 0,
   medicine: 0,
+  energyDrink: 0,
 });
 
 const createDefaultLifetimeStats = () => ({
@@ -117,6 +120,7 @@ export class SaveManager {
       commissionHistory,
       marketBoosts,
       lifetimeStats,
+      restCharges,
     } = this.state;
 
     const safeFarm = Array.isArray(farm) ? farm : [];
@@ -162,8 +166,9 @@ export class SaveManager {
       commissionHistory: commissionHistory && typeof commissionHistory === 'object' ? { ...commissionHistory } : {},
       marketBoosts: marketBoosts && typeof marketBoosts === 'object' ? { ...marketBoosts } : {},
       lifetimeStats: withLifetimeStats(lifetimeStats),
+      restCharges: Math.min(ENERGY_RESTS_PER_DAY, Math.max(0, restCharges ?? ENERGY_RESTS_PER_DAY)),
       saveTime: new Date().toISOString(),
-      version: '1.2',
+      version: '1.3',
     };
   }
 
@@ -197,7 +202,6 @@ export class SaveManager {
 
   applyState(gameState) {
     this.setters.setMoney(gameState.money);
-    this.setters.setEnergy(gameState.energy);
     this.setters.setLevel(gameState.level);
     this.setters.setExperience(gameState.experience);
     this.setters.setTime(gameState.time);
@@ -355,6 +359,15 @@ export class SaveManager {
       normalizedBuildings.greenhouse = desiredGreenhouseCount;
     } else {
       delete normalizedBuildings.greenhouse;
+    }
+
+    const normalizedLevel = Math.max(1, Math.floor(gameState.level || 1));
+    const energyCap = getEnergyCapacity(normalizedLevel, normalizedBuildings);
+    const requestedEnergy = typeof gameState.energy === 'number' ? gameState.energy : energyCap;
+    this.setters.setEnergy(Math.max(0, Math.min(energyCap, requestedEnergy)));
+    if (typeof this.setters.setRestCharges === 'function') {
+      const savedCharges = Math.max(0, Math.floor(gameState.restCharges ?? ENERGY_RESTS_PER_DAY));
+      this.setters.setRestCharges(Math.min(ENERGY_RESTS_PER_DAY, savedCharges));
     }
 
     this.setters.setFarm(normalizedFarm);

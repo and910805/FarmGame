@@ -6,6 +6,56 @@ export const ANIMAL_CAPACITY_STEP = 1;
 export const MAX_ANIMAL_CAPACITY = 24;
 export const ANIMAL_MIN_BUTCHER_AGE_DAYS = 3;
 
+export const BASE_ENERGY_CAP = 100;
+export const ENERGY_CAP_PER_LEVEL = 5;
+export const ENERGY_CAP_MAX = 160;
+export const ENERGY_RESTS_PER_DAY = 2;
+export const ENERGY_DRINK_RECOVERY = 28;
+
+const ENERGY_BUILDING_BONUS = {
+  pond: 6,
+  windmill: 8,
+  barn: 4,
+};
+
+const resolveBuildingLevel = (buildings, key) => {
+  if (!buildings) {
+    return 0;
+  }
+
+  const raw = buildings[key];
+  if (typeof raw === 'number') {
+    return Math.max(0, Math.floor(raw));
+  }
+
+  if (raw && typeof raw === 'object' && typeof raw.level === 'number') {
+    return Math.max(0, Math.floor(raw.level));
+  }
+
+  return raw ? 1 : 0;
+};
+
+export const getEnergyCapacity = (level = 1, buildings = {}) => {
+  const normalizedLevel = Math.max(1, Math.floor(level));
+  const baseCap = BASE_ENERGY_CAP + Math.max(0, normalizedLevel - 1) * ENERGY_CAP_PER_LEVEL;
+
+  const buildingBonus = Object.entries(ENERGY_BUILDING_BONUS).reduce((sum, [key, bonus]) => {
+    const ownedLevel = resolveBuildingLevel(buildings, key);
+    if (ownedLevel <= 0) {
+      return sum;
+    }
+    return sum + bonus * ownedLevel;
+  }, 0);
+
+  return Math.min(ENERGY_CAP_MAX, baseCap + buildingBonus);
+};
+
+export const getRestRecoveryAmount = (level = 1, buildings = {}) => {
+  const capacity = getEnergyCapacity(level, buildings);
+  const quarter = Math.round(capacity * 0.25);
+  return Math.max(18, quarter);
+};
+
 export const getFarmExpansionCost = (currentPlotCount) => {
   if (currentPlotCount >= MAX_FARM_PLOTS) {
     return null;

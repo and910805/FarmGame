@@ -18,6 +18,10 @@ import {
   ANIMAL_TRAIT_MAP,
   ANIMAL_MIN_BUTCHER_AGE_DAYS,
   pickAnimalTraitKey,
+  getEnergyCapacity,
+  getRestRecoveryAmount,
+  ENERGY_RESTS_PER_DAY,
+  ENERGY_DRINK_RECOVERY,
 } from './game/engine/constants';
 import { SaveManager } from './game/engine/SaveManager';
 import { NotificationCenter } from './game/engine/NotificationCenter';
@@ -443,6 +447,7 @@ const FarmGame = () => {
   // 基本狀態
   const [money, setMoney] = useState(500);
   const [energy, setEnergy] = useState(100);
+  const [restCharges, setRestCharges] = useState(ENERGY_RESTS_PER_DAY);
   const [level, setLevel] = useState(1);
   const [experience, setExperience] = useState(0);
   const [time, setTime] = useState(6);
@@ -472,6 +477,7 @@ const FarmGame = () => {
     fertilizer: 0,
     pesticide: 0,
     medicine: 0,
+    energyDrink: 0,
   });
 
   const [questLog, setQuestLog] = useState({});
@@ -838,6 +844,19 @@ const FarmGame = () => {
       energyReduction,
     };
   }, [tools, toolLevels]);
+
+  const energyCap = useMemo(
+    () => getEnergyCapacity(level, buildings),
+    [level, buildings],
+  );
+  const restRecovery = useMemo(
+    () => getRestRecoveryAmount(level, buildings),
+    [level, buildings],
+  );
+  const energyDrinkCount = farmSupplies?.energyDrink || 0;
+  const canRest = restCharges > 0 && energy < energyCap;
+  const canUseEnergyDrink = energyDrinkCount > 0 && energy < energyCap;
+  const drinkRecoveryPreview = Math.min(ENERGY_DRINK_RECOVERY, Math.max(0, energyCap - energy));
   
   // 存檔狀態
   const [saveSlots, setSaveSlots] = useState({
@@ -853,6 +872,8 @@ const FarmGame = () => {
   stateRef.current = {
     money,
     energy,
+    energyCap,
+    restCharges,
     level,
     experience,
     time,
@@ -895,6 +916,16 @@ const FarmGame = () => {
     dynamicQuests,
   };
 
+  useEffect(() => {
+    if (energy > energyCap) {
+      setEnergy(prev => {
+        const next = Math.min(energyCap, prev);
+        stateRef.current.energy = next;
+        return next;
+      });
+    }
+  }, [energy, energyCap, setEnergy]);
+
   const saveManager = useMemo(() => new SaveManager({
     stateRef,
     setters: {
@@ -911,6 +942,7 @@ const FarmGame = () => {
       setFarm,
       setAnimals,
       setAnimalCapacity,
+      setRestCharges,
       setBuildings,
       setTools,
       setOwnedTools,
@@ -1259,7 +1291,13 @@ const FarmGame = () => {
       const advices = [
         weather === 'sunny' ? '☀️ 晴天適合種植番茄和草莓！' : '',
         weather === 'rainy' ? '🌧️ 雨天作物會自動澆水，適合種植小麥！' : '',
-        energy < 30 ? '⚡ 體力不足，建議休息或升級工具！' : '',
+        energy < Math.min(30, Math.floor(energyCap * 0.35)) ? '⚡ 體力不足，記得休息或升級工具！' : '',
+        restCharges > 0 && energy < energyCap && (energyCap - energy) >= Math.max(10, Math.floor(restRecovery * 0.75))
+          ? `🛏️ 還有 ${restCharges} 次小憩機會，稍作休息可恢復體力！`
+          : '',
+        (farmSupplies?.energyDrink || 0) > 0 && energy < energyCap && (energyCap - energy) >= ENERGY_DRINK_RECOVERY / 2
+          ? '🥤 倉庫有精力飲料，緊湊行程時別忘了補充！'
+          : '',
         money > 2000 ? '💰 資金充足，考慮建造新建築！' : '',
         safeAnimals.some(a => (a.happiness ?? 50) < 40) ? '🐾 有動物心情低落，餵食或陪伴牠們吧！' : '',
         safeAnimals.some(a => (a.hunger ?? 60) < 35) ? '🍽️ 有動物快餓扁了，趕快餵牠們！' : '',
@@ -1279,7 +1317,7 @@ const FarmGame = () => {
     const timer = setInterval(generateAdvice, 60000);
     generateAdvice();
     return () => clearInterval(timer);
-  }, [weather, energy, money, animals, inventory, farm]);
+  }, [weather, energy, energyCap, restCharges, restRecovery, money, animals, inventory, farmSupplies, farm]);
 
   // 動態市場價格
   useEffect(() => {
@@ -1371,7 +1409,17 @@ const FarmGame = () => {
           }
 
           handleDailyEvents(upcomingDay, nextSeasonValue, currentWeather);
-          setEnergy(100);
+          const currentLevel = stateRef.current.level || level;
+          const currentBuildings = stateRef.current.buildings || buildings;
+          const nextEnergyCap = getEnergyCapacity(currentLevel, currentBuildings);
+          setEnergy(() => {
+            stateRef.current.energy = nextEnergyCap;
+            return nextEnergyCap;
+          });
+          setRestCharges(() => {
+            stateRef.current.restCharges = ENERGY_RESTS_PER_DAY;
+            return ENERGY_RESTS_PER_DAY;
+          });
 
           // 動物每日狀態與收入結算
           const producedGoods = {};
@@ -2082,9 +2130,41 @@ const FarmGame = () => {
     gameEngine.buySupply(supplyType, { quantity });
   }, [gameEngine]);
 
-  const selectSupply = useCallback((supplyType) => {
-    gameEngine.selectSupply(supplyType);
+  const consumeEnergyDrink = useCallback(() => {
+    gameEngine.drinkEnergySupply();
   }, [gameEngine]);
+
+  const selectSupply = useCallback((supplyType) => {
+    if (supplyType === 'energyDrink') {
+      consumeEnergyDrink();
+      return;
+    }
+    gameEngine.selectSupply(supplyType);
+  }, [gameEngine, consumeEnergyDrink]);
+
+  const restAtHome = useCallback(() => {
+    if (energy >= energyCap) {
+      addNotification('體力已經滿滿的囉！', { type: 'info' });
+      return;
+    }
+    if (restCharges <= 0) {
+      addNotification('今天的休息次數已用完，試著喝瓶精力飲料吧！', { type: 'warning' });
+      return;
+    }
+
+    const recoverable = Math.min(restRecovery, energyCap - energy);
+    setEnergy(prev => {
+      const next = Math.min(energyCap, prev + recoverable);
+      stateRef.current.energy = next;
+      return next;
+    });
+    setRestCharges(prev => {
+      const next = Math.max(0, prev - 1);
+      stateRef.current.restCharges = next;
+      return next;
+    });
+    addNotification(`小憩片刻，恢復 ${recoverable} 體力！`, { type: 'success' });
+  }, [energy, energyCap, restCharges, restRecovery, setEnergy, setRestCharges, addNotification]);
 
   const applySupply = useCallback((plotId) => gameEngine.applySupply(plotId), [gameEngine]);
 
@@ -2224,9 +2304,33 @@ const FarmGame = () => {
             <Coins className="w-5 h-5 text-yellow-400" />
             <span className="font-bold">${money}</span>
           </div>
-          <div className="flex items-center space-x-1">
-            <Zap className="w-5 h-5 text-blue-400" />
-            <span>{energy}/100</span>
+          <div className="flex items-center space-x-2">
+            <div className="flex items-center space-x-1">
+              <Zap className="w-5 h-5 text-blue-200" />
+              <span>{Math.round(energy)}/{energyCap}</span>
+            </div>
+            <button
+              onClick={restAtHome}
+              disabled={!canRest}
+              className={`text-xs px-2 py-[2px] rounded-full border transition-colors ${
+                canRest
+                  ? 'bg-white/20 hover:bg-white/30 border-white/50 text-white'
+                  : 'bg-white/5 border-white/20 text-white/50 cursor-not-allowed'
+              }`}
+            >
+              小憩 +{Math.round(restRecovery)}
+            </button>
+            <button
+              onClick={consumeEnergyDrink}
+              disabled={!canUseEnergyDrink}
+              className={`text-xs px-2 py-[2px] rounded-full border transition-colors ${
+                canUseEnergyDrink
+                  ? 'bg-pink-500/30 hover:bg-pink-500/40 border-pink-200 text-white'
+                  : 'bg-white/5 border-white/20 text-white/50 cursor-not-allowed'
+              }`}
+            >
+              精力 +{Math.round(drinkRecoveryPreview)} ({energyDrinkCount})
+            </button>
           </div>
           <div className="flex items-center space-x-1">
             <Star className="w-5 h-5 text-yellow-400" />
@@ -2381,6 +2485,17 @@ const FarmGame = () => {
                   </div>
                 );
               })}
+            </div>
+            <div className="mb-4 flex flex-wrap items-center gap-2 text-xs">
+              <span className="px-2 py-1 rounded-full bg-blue-100/80 text-blue-800 border border-blue-200/70">
+                體力上限 {energyCap}
+              </span>
+              <span className="px-2 py-1 rounded-full bg-sky-100/80 text-sky-800 border border-sky-200/70">
+                今日小憩剩餘 {restCharges} 次
+              </span>
+              <span className="px-2 py-1 rounded-full bg-pink-100/80 text-pink-800 border border-pink-200/70">
+                精力飲料庫存 {energyDrinkCount}
+              </span>
             </div>
             {sprinklerLevel > 0 && (
               <div className="mb-4 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-700 flex items-center gap-2">
@@ -3494,7 +3609,9 @@ const FarmGame = () => {
               <section>
                 <h3 className="font-semibold text-lg text-sky-600">⚡ 體力、天氣與季節</h3>
                 <ul className="list-disc pl-5 space-y-1 mt-2">
-                  <li>每日體力上限 100，種植、澆水等行動會消耗體力。</li>
+                  <li>體力上限會隨等級與部分建築提升，升級工具則能降低消耗。</li>
+                  <li>每天清晨會回滿體力並重置 {ENERGY_RESTS_PER_DAY} 次「小憩」，每次大約恢復四分之一體力。</li>
+                  <li>精力飲料可立即補充大量體力，記得在農務用品保持庫存。</li>
                   <li>雨天會自動澆水，晴天適合日照作物，雪天則要小心成長變慢。</li>
                   <li>每 30 天進入新季節（春→夏→秋→冬），部分作物或動物在特定季節表現更好。</li>
                 </ul>

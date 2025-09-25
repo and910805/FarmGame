@@ -11,6 +11,8 @@ import {
   MAX_ANIMAL_CAPACITY,
   MAX_FARM_PLOTS,
   pickAnimalTraitKey,
+  ENERGY_DRINK_RECOVERY,
+  getEnergyCapacity,
 } from './constants';
 
 export class GameEngine {
@@ -36,16 +38,33 @@ export class GameEngine {
     }
   }
 
-  consumeSupply(supplyType, { keepSelection = false } = {}) {
-    this.setters.setFarmSupplies(prev => {
-      const previous = prev || {};
-      const current = previous[supplyType] || 0;
-      return { ...previous, [supplyType]: Math.max(0, current - 1) };
-    });
+  getEnergyCap(overrides = {}) {
+    const levelValue = overrides.level ?? this.state.level ?? 1;
+    const buildingValue = overrides.buildings ?? this.state.buildings ?? {};
+    const normalizedLevel = Math.max(1, Math.floor(levelValue || 1));
+    return getEnergyCapacity(normalizedLevel, buildingValue);
+  }
 
-    if (!keepSelection) {
+  consumeSupply(supplyType, { keepSelection = false } = {}) {
+    let remaining = null;
+
+    if (typeof this.setters.setFarmSupplies === 'function') {
+      this.setters.setFarmSupplies(prev => {
+        const previous = prev || {};
+        const current = previous[supplyType] || 0;
+        const nextCount = Math.max(0, current - 1);
+        const updated = { ...previous, [supplyType]: nextCount };
+        this.stateRef.current.farmSupplies = updated;
+        remaining = nextCount;
+        return updated;
+      });
+    }
+
+    if (!keepSelection && typeof this.setters.setSelectedSupply === 'function') {
       this.setters.setSelectedSupply(null);
     }
+
+    return remaining;
   }
 
   getGreenhouseCount(buildings = this.state.buildings) {
@@ -312,10 +331,14 @@ export class GameEngine {
     }
 
     this.setters.setMoney(prev => prev - totalCost);
-    this.setters.setFarmSupplies(prev => {
-      const previous = prev || {};
-      return { ...previous, [supplyType]: (previous[supplyType] || 0) + quantity };
-    });
+    if (typeof this.setters.setFarmSupplies === 'function') {
+      this.setters.setFarmSupplies(prev => {
+        const previous = prev || {};
+        const updated = { ...previous, [supplyType]: (previous[supplyType] || 0) + quantity };
+        this.stateRef.current.farmSupplies = updated;
+        return updated;
+      });
+    }
     this.notify(`購買了 ${quantity} 份${supply.name}！`, { type: 'success' });
   }
 
@@ -413,6 +436,11 @@ export class GameEngine {
       return;
     }
 
+    if (supplyType === 'energyDrink') {
+      this.drinkEnergySupply();
+      return;
+    }
+
     const { selectedSupply } = this.state;
     if (selectedSupply === supplyType) {
       this.setters.setSelectedSupply(null);
@@ -432,6 +460,14 @@ export class GameEngine {
     if (!supply) {
       this.setters.setSelectedSupply(null);
       return false;
+    }
+
+    if (selectedSupply === 'energyDrink') {
+      this.notify('精力飲料請在體力面板飲用！', { type: 'info' });
+      if (typeof this.setters.setSelectedSupply === 'function') {
+        this.setters.setSelectedSupply(null);
+      }
+      return true;
     }
 
     if (selectedSupply === 'medicine') {
@@ -499,6 +535,39 @@ export class GameEngine {
     }
 
     return false;
+  }
+
+  drinkEnergySupply() {
+    const { farmSupplies, energy } = this.state;
+    const available = farmSupplies?.energyDrink || 0;
+    if (available <= 0) {
+      this.notify('沒有精力飲料，先到農務用品補貨吧！', { type: 'warning' });
+      return false;
+    }
+
+    const capacity = this.getEnergyCap();
+    if (energy >= capacity) {
+      this.notify('體力已經飽滿，暫時不需要補充。', { type: 'info' });
+      return false;
+    }
+
+    const recovery = Math.min(ENERGY_DRINK_RECOVERY, capacity - energy);
+    const remaining = this.consumeSupply('energyDrink', { keepSelection: true });
+    if (remaining == null) {
+      return false;
+    }
+
+    if (typeof this.setters.setEnergy === 'function') {
+      this.setters.setEnergy(prev => {
+        const base = typeof prev === 'number' ? prev : energy;
+        const next = Math.min(capacity, base + recovery);
+        this.stateRef.current.energy = next;
+        return next;
+      });
+    }
+
+    this.notify(`喝下精力飲料，恢復 ${recovery} 體力！`, { type: 'success' });
+    return true;
   }
 
   plantSeed(plotId) {
@@ -699,7 +768,11 @@ export class GameEngine {
       return nextFarm;
     });
 
-    this.setters.setEnergy(prev => Math.max(0, prev - energyCost));
+    this.setters.setEnergy(prev => {
+      const next = Math.max(0, prev - energyCost);
+      this.stateRef.current.energy = next;
+      return next;
+    });
     this.notify('澆水完成！', { type: 'success' });
   }
 
