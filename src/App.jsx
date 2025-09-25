@@ -525,6 +525,23 @@ const FarmGame = () => {
     [questManager, dynamicQuests],
   );
 
+  // 新功能狀態
+  const [completedAchievements, setCompletedAchievements] = useState(new Set());
+  const [aiAdvice, setAiAdvice] = useState('');
+  const [marketPrices, setMarketPrices] = useState({});
+  const [previousMarketPrices, setPreviousMarketPrices] = useState({});
+  const [marketUpdateTime, setMarketUpdateTime] = useState(null);
+  const [dailyStats, setDailyStats] = useState([]);
+  const [lifetimeStats, setLifetimeStats] = useState({ cropsPlanted: 0 });
+  const [automation, setAutomation] = useState({ autoWater: false, autoHarvest: false });
+  const [seasonalEvents, setSeasonalEvents] = useState([]);
+  const [seasonalEventHistory, setSeasonalEventHistory] = useState({});
+  const [weatherMissions, setWeatherMissions] = useState([]);
+  const [weatherMissionHistory, setWeatherMissionHistory] = useState({});
+  const [marketCommissions, setMarketCommissions] = useState([]);
+  const [commissionHistory, setCommissionHistory] = useState({});
+  const [marketBoosts, setMarketBoosts] = useState({});
+
   const handleDailyEvents = useCallback((newDay, effectiveSeason, currentWeather) => {
     const dayInSeason = ((newDay - 1) % 30) + 1;
 
@@ -725,23 +742,6 @@ const FarmGame = () => {
     };
   }, [tools, toolLevels]);
   
-  // 新功能狀態
-  const [completedAchievements, setCompletedAchievements] = useState(new Set());
-  const [aiAdvice, setAiAdvice] = useState('');
-  const [marketPrices, setMarketPrices] = useState({});
-  const [previousMarketPrices, setPreviousMarketPrices] = useState({});
-  const [marketUpdateTime, setMarketUpdateTime] = useState(null);
-  const [dailyStats, setDailyStats] = useState([]);
-  const [lifetimeStats, setLifetimeStats] = useState({ cropsPlanted: 0 });
-  const [automation, setAutomation] = useState({ autoWater: false, autoHarvest: false });
-  const [seasonalEvents, setSeasonalEvents] = useState([]);
-  const [seasonalEventHistory, setSeasonalEventHistory] = useState({});
-  const [weatherMissions, setWeatherMissions] = useState([]);
-  const [weatherMissionHistory, setWeatherMissionHistory] = useState({});
-  const [marketCommissions, setMarketCommissions] = useState([]);
-  const [commissionHistory, setCommissionHistory] = useState({});
-  const [marketBoosts, setMarketBoosts] = useState({});
-
   // 存檔狀態
   const [saveSlots, setSaveSlots] = useState({
     slot1: null,
