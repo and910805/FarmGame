@@ -1374,6 +1374,7 @@ const FarmGame = () => {
 
           // 動物每日狀態與收入結算
           const producedGoods = {};
+          let newbornAnimalsCaptured = [];
           setAnimals(prevAnimals => {
             if (!Array.isArray(prevAnimals) || prevAnimals.length === 0) {
               return prevAnimals;
@@ -1745,11 +1746,12 @@ const FarmGame = () => {
 
             const nextAnimals = [...processedAnimals, ...newbornAnimals];
             stateRef.current.animals = nextAnimals;
+            newbornAnimalsCaptured = newbornAnimals;
             return nextAnimals;
           });
 
-          if (newbornAnimals.length > 0) {
-            const firstNewborn = newbornAnimals[0];
+          if (newbornAnimalsCaptured.length > 0) {
+            const firstNewborn = newbornAnimalsCaptured[0];
             promptAnimalNaming(firstNewborn.id, firstNewborn.name || '');
           }
 
