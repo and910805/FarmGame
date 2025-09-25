@@ -7,6 +7,43 @@ export const BASE_ANIMAL_CAPACITY = 6;
 export const ANIMAL_CAPACITY_STEP = 1;
 export const MAX_ANIMAL_CAPACITY = 24;
 
+export const ANIMAL_CARE_ACTIONS = {
+  playtime: {
+    key: 'playtime',
+    label: '陪牠玩耍',
+    shortLabel: '陪玩',
+    needLabel: '想玩耍',
+    description: '與動物一起玩耍可以大幅提升幸福度與羈絆，但會稍微增加飢餓感。',
+    energyCost: 6,
+    happinessBoost: 18,
+    bondBoost: 14,
+    hungerImpact: 14,
+  },
+  grooming: {
+    key: 'grooming',
+    label: '梳洗打理',
+    shortLabel: '梳洗',
+    needLabel: '想梳洗',
+    description: '細心梳洗讓動物保持乾淨舒適，降低生病風險並增加羈絆。',
+    energyCost: 5,
+    happinessBoost: 12,
+    bondBoost: 10,
+    cleanlinessBoost: 22,
+    sootheSickness: true,
+  },
+  cleanPen: {
+    key: 'cleanPen',
+    label: '清理欄舍',
+    shortLabel: '清理',
+    needLabel: '需要清理',
+    description: '整理環境讓欄舍更乾淨，恢復整潔度並讓動物更安心。',
+    energyCost: 7,
+    happinessBoost: 8,
+    bondBoost: 8,
+    cleanlinessBoost: 28,
+  },
+};
+
 export const getFarmExpansionCost = (currentPlotCount) => {
   if (currentPlotCount >= MAX_FARM_PLOTS) {
     return null;
@@ -229,6 +266,20 @@ export class GameEngine {
     return Math.max(0, Math.floor(raw));
   }
 
+  getToolUpgradeCost(toolKey = this.state.tools, upgradesCompleted = this.getToolUpgradeLevel(toolKey)) {
+    const tool = TOOLS[toolKey];
+    if (!tool || !tool.upgradeCost) {
+      return null;
+    }
+
+    const baseCost = Number(tool.upgradeCost) || 0;
+    const increment = Number(tool.upgradeIncrement) || 0;
+    const timesUpgraded = Math.max(0, upgradesCompleted);
+    const scaledCost = baseCost + (increment * timesUpgraded);
+
+    return Math.max(0, Math.floor(scaledCost));
+  }
+
   getEffectiveToolStats(toolKey = this.state.tools) {
     const baseTool = TOOLS[toolKey] || TOOLS.basic;
     const level = this.getToolUpgradeLevel(toolKey);
@@ -257,8 +308,8 @@ export class GameEngine {
       return;
     }
 
-    const { money, marketPrices, inventory } = this.state;
-    const price = (marketPrices && marketPrices[seedType]) || crop.price;
+    const { money, inventory } = this.state;
+    const price = crop.price;
     const seedKey = this.getSeedKey(seedType);
     const storedSeeds = inventory?.[seedKey] || 0;
 
@@ -280,8 +331,8 @@ export class GameEngine {
     }
 
     const amount = Math.max(1, Math.floor(quantity));
-    const { money, marketPrices } = this.state;
-    const price = (marketPrices && marketPrices[seedType]) || crop.price;
+    const { money } = this.state;
+    const price = crop.price;
     const totalCost = price * amount;
 
     if (money < totalCost) {
@@ -391,6 +442,7 @@ export class GameEngine {
       }
 
       resultingSize = next.length;
+      this.stateRef.current.farm = next;
       return next;
     });
 
@@ -487,11 +539,16 @@ export class GameEngine {
         return true;
       }
 
-      this.setters.setFarm(prev => prev.map(p => (
-        p.id === plotId
-          ? { ...p, fertilized: true }
-          : p
-      )));
+      this.setters.setFarm(prev => {
+        const safePrev = Array.isArray(prev) ? prev : [];
+        const nextFarm = safePrev.map(p => (
+          p.id === plotId
+            ? { ...p, fertilized: true }
+            : p
+        ));
+        this.stateRef.current.farm = nextFarm;
+        return nextFarm;
+      });
       this.consumeSupply('fertilizer', { keepSelection: available > 1 });
       this.notify('施用了有機肥料，作物成長速度提升！', { type: 'success' });
       return true;
@@ -503,11 +560,16 @@ export class GameEngine {
         return true;
       }
 
-      this.setters.setFarm(prev => prev.map(p => (
-        p.id === plotId
-          ? { ...p, pest: false, pestDays: 0 }
-          : p
-      )));
+      this.setters.setFarm(prev => {
+        const safePrev = Array.isArray(prev) ? prev : [];
+        const nextFarm = safePrev.map(p => (
+          p.id === plotId
+            ? { ...p, pest: false, pestDays: 0 }
+            : p
+        ));
+        this.stateRef.current.farm = nextFarm;
+        return nextFarm;
+      });
       this.consumeSupply('pesticide', { keepSelection: available > 1 });
       this.notify('成功清除害蟲，作物恢復生長！', { type: 'success' });
       this.emitQuestEvent({ type: 'pestClear', amount: 1 });
@@ -518,7 +580,7 @@ export class GameEngine {
   }
 
   plantSeed(plotId) {
-    const { selectedSeed, tools, energy, money, marketPrices, inventory, season, farm } = this.state;
+    const { selectedSeed, tools, energy, money, inventory, season, farm } = this.state;
     if (!selectedSeed) return;
 
     const farmList = Array.isArray(farm) ? farm : [];
@@ -534,7 +596,7 @@ export class GameEngine {
       return;
     }
 
-    const price = (marketPrices && marketPrices[selectedSeed]) || CROPS[selectedSeed].price;
+    const price = CROPS[selectedSeed].price;
     const seedKey = this.getSeedKey(selectedSeed);
     const storedSeeds = inventory?.[seedKey] || 0;
     const usingStoredSeed = storedSeeds > 0;
@@ -659,20 +721,25 @@ export class GameEngine {
       [crop]: ((prev && prev[crop]) || 0) + 1,
     }));
     this.setters.setExperience(prev => prev + 10);
-    this.setters.setFarm(prev => prev.map(p => (
-      p.id === plotId
-        ? {
-            ...p,
-            crop: null,
-            plantTime: null,
-            watered: false,
-            ready: false,
-            pest: false,
-            pestDays: 0,
-            fertilized: false,
-          }
-        : p
-    )));
+    this.setters.setFarm(prev => {
+      const safePrev = Array.isArray(prev) ? prev : [];
+      const nextFarm = safePrev.map(p => (
+        p.id === plotId
+          ? {
+              ...p,
+              crop: null,
+              plantTime: null,
+              watered: false,
+              ready: false,
+              pest: false,
+              pestDays: 0,
+              fertilized: false,
+            }
+          : p
+      ));
+      this.stateRef.current.farm = nextFarm;
+      return nextFarm;
+    });
 
     this.notify(`收成了 ${CROPS[crop].emoji}！已存入倉庫（估值 $${sellPrice}）。`, { type: 'success' });
     this.emitQuestEvent({ type: 'harvest', crop, amount: 1 });
@@ -686,11 +753,16 @@ export class GameEngine {
       return;
     }
 
-    this.setters.setFarm(prev => prev.map(plot =>
-      plot.id === plotId && plot.crop && !plot.watered
-        ? { ...plot, watered: true }
-        : plot
-    ));
+    this.setters.setFarm(prev => {
+      const safePrev = Array.isArray(prev) ? prev : [];
+      const nextFarm = safePrev.map(plot =>
+        plot.id === plotId && plot.crop && !plot.watered
+          ? { ...plot, watered: true }
+          : plot
+      );
+      this.stateRef.current.farm = nextFarm;
+      return nextFarm;
+    });
 
     this.setters.setEnergy(prev => Math.max(0, prev - energyCost));
     this.notify('澆水完成！', { type: 'success' });
@@ -739,6 +811,11 @@ export class GameEngine {
         sicknessDays: 0,
         name: `${animal.name}${baseIndex + index + 1}`,
         productReady: 0,
+        bond: 20,
+        cleanliness: 85,
+        careNeed: null,
+        careDays: 0,
+        lastCareTime: null,
       }));
       return [...prevList, ...additions];
     });
@@ -898,13 +975,18 @@ export class GameEngine {
     }
 
     let built = false;
-    this.setters.setFarm(prev => prev.map(plot => {
-      if (plot.id === plotId && !plot.greenhouse) {
-        built = true;
-        return { ...plot, greenhouse: true };
-      }
-      return plot;
-    }));
+    this.setters.setFarm(prev => {
+      const safePrev = Array.isArray(prev) ? prev : [];
+      const nextFarm = safePrev.map(plot => {
+        if (plot.id === plotId && !plot.greenhouse) {
+          built = true;
+          return { ...plot, greenhouse: true };
+        }
+        return plot;
+      });
+      this.stateRef.current.farm = nextFarm;
+      return nextFarm;
+    });
 
     if (!built) {
       this.notify('暫時無法建造，請確認土地是否空閒。', { type: 'warning' });
@@ -940,14 +1022,14 @@ export class GameEngine {
 
     if (ownedSet.has(toolType)) {
       if (wantsUpgrade) {
-        if (!tool.upgradeCost) {
+        const currentLevel = this.getToolUpgradeLevel(toolType);
+        const cost = this.getToolUpgradeCost(toolType, currentLevel);
+        if (cost === null) {
           this.notify('這項工具無法再升級。', { type: 'info' });
           return;
         }
 
-        const currentLevel = this.getToolUpgradeLevel(toolType);
         const nextLevel = currentLevel + 1;
-        const cost = tool.upgradeCost;
         if (money < cost) {
           this.notify('金錢不足，暫時無法升級工具。', { type: 'error' });
           return;
@@ -957,15 +1039,24 @@ export class GameEngine {
         const nextEnergy = (tool.energyReduction || 0) + (tool.energyUpgrade || 0) * nextLevel;
 
         this.setters.setMoney(prev => prev - cost);
+        const updateLevels = (previousLevels = {}) => {
+          const safePrev = previousLevels && typeof previousLevels === 'object' ? previousLevels : {};
+          const current = safePrev[toolType] || 0;
+          const nextLevels = { ...safePrev, [toolType]: current + 1 };
+          this.stateRef.current.toolLevels = nextLevels;
+          return nextLevels;
+        };
+
         if (typeof this.setters.setToolLevels === 'function') {
-          this.setters.setToolLevels(prev => {
-            const previous = prev && typeof prev === 'object' ? prev : {};
-            const current = previous[toolType] || 0;
-            return { ...previous, [toolType]: current + 1 };
-          });
+          this.setters.setToolLevels(prev => updateLevels(prev));
+        } else {
+          updateLevels(this.stateRef.current.toolLevels);
         }
         this.setters.setTools(toolType);
-        this.notify(`升級 ${tool.name} 至 Lv.${nextLevel + 1}！速度提升至 ${Math.round(nextSpeed * 100)}%，體力節省 ${Math.round(nextEnergy)}。`, { type: 'success' });
+        this.notify(
+          `升級 ${tool.name} 至 Lv.${nextLevel + 1}！速度提升至 ${Math.round(nextSpeed * 100)}%，體力節省 ${Math.round(nextEnergy)}。`,
+          { type: 'success' }
+        );
         return;
       }
 
@@ -1004,10 +1095,20 @@ export class GameEngine {
       this.setters.setToolLevels(prev => {
         const previous = prev && typeof prev === 'object' ? prev : {};
         if (toolType in previous) {
+          this.stateRef.current.toolLevels = previous;
           return previous;
         }
-        return { ...previous, [toolType]: 0 };
+        const nextLevels = { ...previous, [toolType]: 0 };
+        this.stateRef.current.toolLevels = nextLevels;
+        return nextLevels;
       });
+    } else {
+      const prevLevels = this.stateRef.current.toolLevels && typeof this.stateRef.current.toolLevels === 'object'
+        ? this.stateRef.current.toolLevels
+        : {};
+      if (!(toolType in prevLevels)) {
+        this.stateRef.current.toolLevels = { ...prevLevels, [toolType]: 0 };
+      }
     }
     this.setters.setShowToolShop(false);
     this.notify(`購買並裝備 ${tool.name}！`, { type: 'success' });
@@ -1117,6 +1218,124 @@ export class GameEngine {
     }
   }
 
+  careForAnimal(animalId, actionKey) {
+    const { animals = [], energy } = this.state;
+    if (!Array.isArray(animals) || animals.length === 0) {
+      this.notify('目前還沒有動物可互動。', { type: 'info' });
+      return;
+    }
+
+    const action = ANIMAL_CARE_ACTIONS[actionKey];
+    if (!action) {
+      return;
+    }
+
+    const animal = animals.find(entry => entry.id === animalId);
+    if (!animal) {
+      this.notify('找不到這隻動物。', { type: 'error' });
+      return;
+    }
+
+    if (energy < action.energyCost) {
+      this.notify('體力不足，稍作休息再來陪伴牠們吧！', { type: 'warning' });
+      return;
+    }
+
+    const animalData = ANIMALS[animal.type];
+    if (!animalData) {
+      return;
+    }
+
+    this.setters.setEnergy(prev => {
+      const updated = Math.max(0, prev - action.energyCost);
+      this.stateRef.current.energy = updated;
+      return updated;
+    });
+
+    const previousBond = animal.bond ?? 0;
+    let resolvedNeed = false;
+    let soothed = false;
+    let cleanlinessGain = 0;
+    let resultingBond = null;
+
+    this.setters.setAnimals(prev => {
+      const baseList = Array.isArray(prev) ? prev : [];
+      const nextList = baseList.map(entry => {
+        if (entry.id !== animalId) {
+          return entry;
+        }
+
+        const baseHappiness = entry.happiness ?? animalData.happiness ?? 50;
+        const baseHunger = entry.hunger ?? 60;
+        const baseBond = entry.bond ?? 0;
+        const baseCleanliness = entry.cleanliness ?? 70;
+        const hungerImpact = action.hungerImpact ?? 0;
+        const cleanlinessBoost = action.cleanlinessBoost ?? 0;
+        const needResolved = entry.careNeed === actionKey;
+
+        let nextSicknessDays = entry.sicknessDays ?? (entry.sick ? 1 : 0);
+        let nextSick = entry.sick ?? false;
+        if (action.sootheSickness && nextSick) {
+          nextSicknessDays = Math.max(0, nextSicknessDays - 1);
+          if (nextSicknessDays <= 0 || Math.random() < 0.35) {
+            nextSick = false;
+            nextSicknessDays = 0;
+            soothed = true;
+          }
+        }
+
+        const nextHappinessBase = baseHappiness + action.happinessBoost + (needResolved ? 6 : 0);
+        const nextHunger = Math.max(0, Math.min(100, baseHunger - hungerImpact));
+        const nextBond = Math.min(100, baseBond + action.bondBoost);
+        const nextCleanliness = Math.max(0, Math.min(100, baseCleanliness + cleanlinessBoost));
+        resolvedNeed = resolvedNeed || needResolved;
+        cleanlinessGain = Math.max(cleanlinessGain, Math.max(0, nextCleanliness - baseCleanliness));
+        resultingBond = nextBond;
+
+        const nextState = {
+          ...entry,
+          happiness: Math.min(100, Math.max(0, nextHappinessBase)),
+          hunger: nextHunger,
+          bond: nextBond,
+          cleanliness: nextCleanliness,
+          careNeed: needResolved ? null : entry.careNeed ?? null,
+          careDays: needResolved ? 0 : entry.careDays ?? 0,
+          lastCareTime: Date.now(),
+          sick: nextSick,
+          sicknessDays: nextSicknessDays,
+        };
+
+        return nextState;
+      });
+
+      this.stateRef.current.animals = nextList;
+      return nextList;
+    });
+
+    const actionLabel = action.shortLabel || action.label;
+    const message = resolvedNeed
+      ? `${animal.name} 得到了期待已久的${actionLabel}時間！`
+      : `與 ${animal.name} 進行了${actionLabel}，感情升溫囉！`;
+
+    this.notify(`🐾 ${message}`, { type: resolvedNeed ? 'success' : 'info' });
+
+    if (cleanlinessGain > 0 && action.cleanlinessBoost) {
+      this.notify(`${animal.name} 的欄舍煥然一新，感覺更加舒適！`, { type: 'info' });
+    }
+
+    if (soothed) {
+      this.notify(`${animal.name} 的不適大幅緩解，看起來好多了。`, { type: 'success' });
+    }
+
+    const milestones = [30, 60, 90];
+    if (resultingBond != null) {
+      const reached = milestones.filter(threshold => previousBond < threshold && resultingBond >= threshold);
+      if (reached.length > 0) {
+        this.notify(`💞 與 ${animal.name} 的羈絆提升到 ${Math.round(resultingBond)}！`, { type: 'success' });
+      }
+    }
+  }
+
   feedAnimal(animalId) {
     const { animals, money } = this.state;
     const animal = animals.find(a => a.id === animalId);
@@ -1135,16 +1354,21 @@ export class GameEngine {
     }
 
     this.setters.setMoney(prev => prev - cost);
-    this.setters.setAnimals(prev => prev.map(a =>
-      a.id === animalId
-        ? {
-            ...a,
-            happiness: Math.min(100, (a.happiness ?? ANIMALS[a.type].happiness) + 20),
-            hunger: Math.min(100, currentHunger + 40),
-            lastFed: Date.now(),
-          }
-        : a
-    ));
+    this.setters.setAnimals(prev => {
+      const nextList = prev.map(a =>
+        a.id === animalId
+          ? {
+              ...a,
+              happiness: Math.min(100, (a.happiness ?? ANIMALS[a.type].happiness) + 20),
+              hunger: Math.min(100, currentHunger + 40),
+              lastFed: Date.now(),
+              bond: Math.min(100, (a.bond ?? 0) + 4),
+            }
+          : a
+      );
+      this.stateRef.current.animals = nextList;
+      return nextList;
+    });
     this.notify(`餵食了 ${animal.name}！`, { type: 'success' });
   }
 
@@ -1165,16 +1389,21 @@ export class GameEngine {
       return;
     }
 
-    this.setters.setAnimals(prev => prev.map(a =>
-      a.id === animalId
-        ? {
-            ...a,
-            sick: false,
-            happiness: Math.min(100, (a.happiness ?? ANIMALS[a.type].happiness) + 25),
-            sicknessDays: 0,
-          }
-        : a
-    ));
+    this.setters.setAnimals(prev => {
+      const nextList = prev.map(a =>
+        a.id === animalId
+          ? {
+              ...a,
+              sick: false,
+              happiness: Math.min(100, (a.happiness ?? ANIMALS[a.type].happiness) + 25),
+              sicknessDays: 0,
+              bond: Math.min(100, (a.bond ?? 0) + 6),
+            }
+          : a
+      );
+      this.stateRef.current.animals = nextList;
+      return nextList;
+    });
 
     this.consumeSupply('medicine', { keepSelection: medicineCount > 1 });
     this.notify(`已替 ${animal.name} 使用營養劑，狀況好多了！`, { type: 'success' });
@@ -1206,11 +1435,15 @@ export class GameEngine {
     }
 
     const product = ANIMAL_PRODUCTS[animalData.product];
-    this.setters.setAnimals(prev => prev.map(entry => (
-      entry.id === animalId
-        ? { ...entry, productReady: 0, lastCollected: Date.now() }
-        : entry
-    )));
+    this.setters.setAnimals(prev => {
+      const nextList = prev.map(entry => (
+        entry.id === animalId
+          ? { ...entry, productReady: 0, lastCollected: Date.now(), bond: Math.min(100, (entry.bond ?? 0) + 2) }
+          : entry
+      ));
+      this.stateRef.current.animals = nextList;
+      return nextList;
+    });
 
     this.setters.setInventory(prev => ({
       ...prev,

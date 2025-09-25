@@ -1,5 +1,12 @@
 import { ANIMALS, CROPS, ANIMAL_PRODUCTS } from '../data/GameCatalog';
-import { BASE_ANIMAL_CAPACITY, MAX_ANIMAL_CAPACITY, BASE_FARM_PLOTS, MAX_FARM_PLOTS, BUILDING_UPGRADES } from './GameEngine';
+import {
+  BASE_ANIMAL_CAPACITY,
+  MAX_ANIMAL_CAPACITY,
+  BASE_FARM_PLOTS,
+  MAX_FARM_PLOTS,
+  BUILDING_UPGRADES,
+  ANIMAL_CARE_ACTIONS,
+} from './GameEngine';
 
 const createDefaultInventory = () => {
   const inventory = {};
@@ -91,6 +98,13 @@ export class SaveManager {
       dynamicQuests,
       ownedTools,
       toolLevels,
+      seasonalEvents,
+      seasonalEventHistory,
+      weatherMissions,
+      weatherMissionHistory,
+      marketCommissions,
+      commissionHistory,
+      marketBoosts,
     } = this.state;
 
     const safeFarm = Array.isArray(farm) ? farm : [];
@@ -128,6 +142,13 @@ export class SaveManager {
       dynamicQuests: dynamicQuests || {},
       ownedTools: Array.isArray(ownedTools) ? ownedTools : Array.from(ownedTools || []),
       toolLevels: toolLevels && typeof toolLevels === 'object' ? { ...toolLevels } : {},
+      seasonalEvents: Array.isArray(seasonalEvents) ? seasonalEvents : [],
+      seasonalEventHistory: seasonalEventHistory && typeof seasonalEventHistory === 'object' ? { ...seasonalEventHistory } : {},
+      weatherMissions: Array.isArray(weatherMissions) ? weatherMissions : [],
+      weatherMissionHistory: weatherMissionHistory && typeof weatherMissionHistory === 'object' ? { ...weatherMissionHistory } : {},
+      marketCommissions: Array.isArray(marketCommissions) ? marketCommissions : [],
+      commissionHistory: commissionHistory && typeof commissionHistory === 'object' ? { ...commissionHistory } : {},
+      marketBoosts: marketBoosts && typeof marketBoosts === 'object' ? { ...marketBoosts } : {},
       saveTime: new Date().toISOString(),
       version: '1.1',
     };
@@ -179,6 +200,39 @@ export class SaveManager {
         ? { ...gameState.dynamicQuests }
         : {};
       this.setters.setDynamicQuests(dynamic);
+    }
+    if (typeof this.setters.setSeasonalEvents === 'function') {
+      this.setters.setSeasonalEvents(Array.isArray(gameState.seasonalEvents) ? gameState.seasonalEvents : []);
+    }
+    if (typeof this.setters.setSeasonalEventHistory === 'function') {
+      const history = gameState.seasonalEventHistory && typeof gameState.seasonalEventHistory === 'object'
+        ? { ...gameState.seasonalEventHistory }
+        : {};
+      this.setters.setSeasonalEventHistory(history);
+    }
+    if (typeof this.setters.setWeatherMissions === 'function') {
+      this.setters.setWeatherMissions(Array.isArray(gameState.weatherMissions) ? gameState.weatherMissions : []);
+    }
+    if (typeof this.setters.setWeatherMissionHistory === 'function') {
+      const history = gameState.weatherMissionHistory && typeof gameState.weatherMissionHistory === 'object'
+        ? { ...gameState.weatherMissionHistory }
+        : {};
+      this.setters.setWeatherMissionHistory(history);
+    }
+    if (typeof this.setters.setMarketCommissions === 'function') {
+      this.setters.setMarketCommissions(Array.isArray(gameState.marketCommissions) ? gameState.marketCommissions : []);
+    }
+    if (typeof this.setters.setCommissionHistory === 'function') {
+      const history = gameState.commissionHistory && typeof gameState.commissionHistory === 'object'
+        ? { ...gameState.commissionHistory }
+        : {};
+      this.setters.setCommissionHistory(history);
+    }
+    if (typeof this.setters.setMarketBoosts === 'function') {
+      const boosts = gameState.marketBoosts && typeof gameState.marketBoosts === 'object'
+        ? { ...gameState.marketBoosts }
+        : {};
+      this.setters.setMarketBoosts(boosts);
     }
     if (typeof this.setters.setOwnedTools === 'function') {
       const owned = Array.isArray(gameState.ownedTools)
@@ -288,6 +342,7 @@ export class SaveManager {
     }
 
     this.setters.setFarm(normalizedFarm);
+    this.stateRef.current.farm = normalizedFarm;
     const baseSupplies = { ...createDefaultSupplies(), ...(gameState.farmSupplies || {}) };
     Object.entries(normalizedInventory).forEach(([key, value]) => {
       if (key.startsWith('seed_')) {
@@ -303,6 +358,11 @@ export class SaveManager {
           sick: animal.sick ?? false,
           productReady: Math.max(0, Math.floor(animal.productReady || 0)),
           sicknessDays: Math.max(0, Math.floor(animal.sicknessDays ?? (animal.sick ? 1 : 0))),
+          bond: Math.max(0, Math.min(100, Math.floor(animal.bond ?? 20))),
+          cleanliness: Math.max(0, Math.min(100, Math.floor(animal.cleanliness ?? 80))),
+          careNeed: animal.careNeed && ANIMAL_CARE_ACTIONS[animal.careNeed] ? animal.careNeed : null,
+          careDays: Math.max(0, Math.floor(animal.careDays ?? 0)),
+          lastCareTime: animal.lastCareTime ?? null,
         }))
       : [];
     this.setters.setAnimals(sanitizedAnimals);

@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { Sprout, Coins, ShoppingCart, Heart, Home, Sun, Moon, Zap, Droplets, Hammer, Building, Star, Save, Trophy, Settings, MessageCircle, Target, UtensilsCrossed, TrendingUp, TrendingDown, Clock3, Boxes } from 'lucide-react';
+import { Sprout, Coins, ShoppingCart, Heart, Home, Sun, Moon, Zap, Droplets, Hammer, Building, Star, Save, Trophy, Settings, MessageCircle, Target, UtensilsCrossed, TrendingUp, TrendingDown, Clock3, Boxes, Sparkles } from 'lucide-react';
 import { CROPS, ANIMALS, BUILDINGS, TOOLS, ACHIEVEMENTS, NPCS, WEATHER_TYPES, SEASONS, FARM_SUPPLIES, ANIMAL_PRODUCTS } from './game/data/GameCatalog';
 import { GameFormatter } from './game/utils/GameFormatter';
-import { GameEngine, getFarmExpansionCost, getAnimalHousingExpansionCost, BASE_FARM_PLOTS, MAX_FARM_PLOTS, BASE_ANIMAL_CAPACITY, MAX_ANIMAL_CAPACITY, FARM_EXPANSION_BATCH, ANIMAL_CAPACITY_STEP, BUILDING_UPGRADES } from './game/engine/GameEngine';
+import { GameEngine, getFarmExpansionCost, getAnimalHousingExpansionCost, BASE_FARM_PLOTS, MAX_FARM_PLOTS, BASE_ANIMAL_CAPACITY, MAX_ANIMAL_CAPACITY, FARM_EXPANSION_BATCH, ANIMAL_CAPACITY_STEP, BUILDING_UPGRADES, ANIMAL_CARE_ACTIONS } from './game/engine/GameEngine';
 import { SaveManager } from './game/engine/SaveManager';
 import { NotificationCenter } from './game/engine/NotificationCenter';
 import { createInitialInventory, INVENTORY_METADATA, INVENTORY_ORDER } from './game/state/InventoryState';
@@ -28,7 +28,399 @@ const ANIMAL_ECOLOGY_CONFIG = {
     happinessWeight: 0.003,
     hungerWeight: 0.0025,
     maxPairsPerType: 3,
+    bondThreshold: 55,
+    bondWeight: 0.0015,
   },
+};
+
+const ANIMAL_INTERACTION_CONFIG = {
+  dailyNeedChance: 0.5,
+  skipHappinessPenalty: 8,
+  escalatedPenalty: 14,
+  neglectBondPenalty: 4,
+  neglectSicknessChance: 0.2,
+  bondDecay: 1,
+  cleanlinessDecay: 7,
+  cleanlinessThreshold: 48,
+  severeCleanlinessThreshold: 28,
+  cleanlinessHappinessPenalty: 6,
+  severeCleanlinessPenalty: 12,
+  cleanlinessSicknessChance: 0.22,
+};
+
+const SEASONAL_FESTIVAL_DEFINITIONS = [
+  {
+    id: 'spring_blossom',
+    season: 'spring',
+    days: [6, 18],
+    duration: 3,
+    name: '春芽花卉節',
+    description: '村莊舉辦花卉節，需要香甜莓果點綴攤位。',
+    requirements: [
+      { type: 'crop', key: 'strawberry', amount: 14 },
+      { type: 'crop', key: 'blueberry', amount: 10 },
+    ],
+    rewards: {
+      money: 420,
+      seeds: [{ crop: 'pumpkin', amount: 3 }],
+    },
+    cooldown: 24,
+  },
+  {
+    id: 'summer_solstice',
+    season: 'summer',
+    days: [9, 21],
+    duration: 3,
+    name: '夏至市集',
+    description: '旅行商人想要用新鮮蔬果打造夏季拼盤。',
+    requirements: [
+      { type: 'crop', key: 'corn', amount: 18 },
+      { type: 'crop', key: 'tomato', amount: 16 },
+    ],
+    rewards: {
+      money: 520,
+      seeds: [{ crop: 'rice', amount: 4 }],
+    },
+    cooldown: 24,
+  },
+  {
+    id: 'autumn_harvest_gala',
+    season: 'autumn',
+    days: [12],
+    duration: 4,
+    name: '秋收盛宴',
+    description: '鎮上的大宴會需要溫暖濃郁的秋季作物。',
+    requirements: [
+      { type: 'crop', key: 'pumpkin', amount: 10 },
+      { type: 'crop', key: 'soybean', amount: 18 },
+    ],
+    rewards: {
+      money: 600,
+      seeds: [{ crop: 'tea', amount: 3 }],
+    },
+    cooldown: 24,
+  },
+  {
+    id: 'winter_lantern_fest',
+    season: 'winter',
+    days: [8, 24],
+    duration: 3,
+    name: '冬燈祭',
+    description: '里長準備暖心晚會，需要主食填滿暖鍋。',
+    requirements: [
+      { type: 'crop', key: 'wheat', amount: 20 },
+      { type: 'crop', key: 'potato', amount: 18 },
+    ],
+    rewards: {
+      money: 480,
+      supplies: [{ key: 'fertilizer', amount: 2 }],
+      seeds: [{ crop: 'strawberry', amount: 4 }],
+    },
+    cooldown: 24,
+  },
+];
+
+const WEATHER_MISSION_DEFINITIONS = [
+  {
+    id: 'storm_repair_drive',
+    weather: 'storm',
+    seasons: ['spring', 'summer', 'autumn'],
+    name: '暴風修復支援',
+    description: '暴風雨後鄰村急需乾草與飼料修繕畜舍。',
+    duration: 2,
+    requirements: [
+      { type: 'crop', key: 'wheat', amount: 18 },
+      { type: 'crop', key: 'corn', amount: 14 },
+    ],
+    rewards: {
+      money: 420,
+      supplies: [{ key: 'pesticide', amount: 2 }],
+      seeds: [{ crop: 'pumpkin', amount: 2 }],
+    },
+    cooldown: 6,
+  },
+  {
+    id: 'rainy_storage_aid',
+    weather: 'rainy',
+    seasons: ['spring', 'summer'],
+    name: '雨季防潮任務',
+    description: '合作社募集黃豆與茶葉調製防潮粉末。',
+    duration: 2,
+    requirements: [
+      { type: 'crop', key: 'soybean', amount: 16 },
+      { type: 'crop', key: 'tea', amount: 10 },
+    ],
+    rewards: {
+      money: 380,
+      supplies: [{ key: 'fertilizer', amount: 2 }],
+    },
+    cooldown: 5,
+  },
+  {
+    id: 'snow_relief_program',
+    weather: 'snow',
+    seasons: ['winter'],
+    name: '雪季保暖補給',
+    description: '鎮公所徵集暖胃食材供應救助站。',
+    duration: 3,
+    requirements: [
+      { type: 'crop', key: 'potato', amount: 16 },
+      { type: 'crop', key: 'rice', amount: 18 },
+    ],
+    rewards: {
+      money: 450,
+      seeds: [{ crop: 'blueberry', amount: 3 }],
+    },
+    cooldown: 7,
+  },
+];
+
+const MARKET_COMMISSION_TEMPLATES = [
+  {
+    id: 'city_bistro_combo',
+    client: '都會餐酒館',
+    seasons: ['spring', 'summer'],
+    description: '客席主廚想用番茄與藍莓打造風味套餐。',
+    duration: 3,
+    requirements: [
+      { type: 'crop', key: 'tomato', amount: 16 },
+      { type: 'crop', key: 'blueberry', amount: 12 },
+    ],
+    rewards: {
+      money: 520,
+      boosts: [{ crop: 'tomato', percent: 0.05 }],
+    },
+  },
+  {
+    id: 'harvest_fair_bundle',
+    client: '農會特採部',
+    seasons: ['autumn'],
+    description: '農會募集秋季作物禮盒，需供應南瓜與黃豆。',
+    duration: 3,
+    requirements: [
+      { type: 'crop', key: 'pumpkin', amount: 12 },
+      { type: 'crop', key: 'soybean', amount: 18 },
+    ],
+    rewards: {
+      money: 640,
+      boosts: [{ crop: 'pumpkin', percent: 0.06 }],
+    },
+  },
+  {
+    id: 'artisan_tea_set',
+    client: '職人工坊',
+    seasons: ['summer', 'autumn'],
+    description: '工坊設計高級茶點組合，需要茶葉與草莓。',
+    duration: 4,
+    requirements: [
+      { type: 'crop', key: 'tea', amount: 12 },
+      { type: 'crop', key: 'strawberry', amount: 14 },
+    ],
+    rewards: {
+      money: 580,
+      boosts: [
+        { crop: 'tea', percent: 0.05 },
+        { crop: 'strawberry', percent: 0.03 },
+      ],
+    },
+  },
+  {
+    id: 'winter_stockpile',
+    client: '北境補給隊',
+    seasons: ['winter'],
+    description: '補給隊準備冬季糧食，徵集馬鈴薯與小麥。',
+    duration: 4,
+    requirements: [
+      { type: 'crop', key: 'potato', amount: 18 },
+      { type: 'crop', key: 'wheat', amount: 22 },
+    ],
+    rewards: {
+      money: 560,
+      boosts: [{ crop: 'wheat', percent: 0.04 }],
+    },
+  },
+];
+
+const MAX_ACTIVE_COMMISSIONS = 3;
+
+const resolveRequirementLabel = (requirement) => {
+  if (!requirement) return '';
+  const { type, key, amount } = requirement;
+  if (type === 'crop' && CROPS[key]) {
+    const crop = CROPS[key];
+    return `${crop.emoji} ${crop.name} x${amount}`;
+  }
+  if (type === 'seed' && CROPS[key]) {
+    const crop = CROPS[key];
+    return `🌱 ${crop.name}種子 x${amount}`;
+  }
+  if (type === 'product' && ANIMAL_PRODUCTS[key]) {
+    const product = ANIMAL_PRODUCTS[key];
+    return `${product.emoji} ${product.name} x${amount}`;
+  }
+  if (type === 'supply' && FARM_SUPPLIES[key]) {
+    const supply = FARM_SUPPLIES[key];
+    return `${supply.emoji || '📦'} ${supply.name} x${amount}`;
+  }
+  return `${key} x${amount}`;
+};
+
+const getRequirementInventoryKey = (requirement) => {
+  if (!requirement) return null;
+  const { type, key } = requirement;
+  switch (type) {
+    case 'crop':
+    case 'product':
+      return key;
+    case 'seed':
+      return `seed_${key}`;
+    default:
+      return null;
+  }
+};
+
+const getRequirementCurrentAmount = (requirement, inventory, farmSupplies) => {
+  if (!requirement) return 0;
+  const { type, key } = requirement;
+  if (type === 'supply') {
+    return farmSupplies?.[key] || 0;
+  }
+  const inventoryKey = getRequirementInventoryKey(requirement);
+  if (!inventoryKey) {
+    return 0;
+  }
+  return inventory?.[inventoryKey] || 0;
+};
+
+const canFulfillRequirements = (requirements, inventory, farmSupplies) => {
+  if (!Array.isArray(requirements) || requirements.length === 0) {
+    return true;
+  }
+  return requirements.every(req => getRequirementCurrentAmount(req, inventory, farmSupplies) >= (req.amount || 0));
+};
+
+const applyRequirementSpending = (requirements, setInventory, setFarmSupplies) => {
+  if (!Array.isArray(requirements) || requirements.length === 0) {
+    return;
+  }
+
+  const supplyRequirements = requirements.filter(req => req.type === 'supply');
+  const inventoryRequirements = requirements.filter(req => req.type !== 'supply');
+
+  if (inventoryRequirements.length > 0) {
+    setInventory(prev => {
+      const next = { ...(prev || {}) };
+      inventoryRequirements.forEach(req => {
+        const key = getRequirementInventoryKey(req);
+        if (!key) return;
+        const current = next[key] || 0;
+        next[key] = Math.max(0, current - (req.amount || 0));
+      });
+      return next;
+    });
+  }
+
+  if (supplyRequirements.length > 0) {
+    setFarmSupplies(prev => {
+      const base = prev || {};
+      const next = { ...base };
+      supplyRequirements.forEach(req => {
+        const current = next[req.key] || 0;
+        next[req.key] = Math.max(0, current - (req.amount || 0));
+      });
+      return next;
+    });
+  }
+};
+
+const applyRewardGrant = ({ rewards }, { setMoney, setInventory, setFarmSupplies, setMarketBoosts }) => {
+  if (!rewards) {
+    return;
+  }
+
+  if (rewards.money) {
+    setMoney(prev => prev + rewards.money);
+  }
+
+  if (Array.isArray(rewards.seeds) && rewards.seeds.length > 0) {
+    setInventory(prev => {
+      const next = { ...(prev || {}) };
+      rewards.seeds.forEach(seed => {
+        if (!seed?.crop || !seed.amount) return;
+        const key = `seed_${seed.crop}`;
+        next[key] = (next[key] || 0) + seed.amount;
+      });
+      return next;
+    });
+  }
+
+  if (Array.isArray(rewards.supplies) && rewards.supplies.length > 0) {
+    setFarmSupplies(prev => {
+      const base = prev || {};
+      const next = { ...base };
+      rewards.supplies.forEach(supply => {
+        if (!supply?.key || !supply.amount) return;
+        next[supply.key] = (next[supply.key] || 0) + supply.amount;
+      });
+      return next;
+    });
+  }
+
+  if (Array.isArray(rewards.boosts) && rewards.boosts.length > 0) {
+    setMarketBoosts(prev => {
+      const base = prev || {};
+      const next = { ...base };
+      rewards.boosts.forEach(boost => {
+        if (!boost?.crop || !boost.percent) return;
+        next[boost.crop] = (next[boost.crop] || 0) + boost.percent;
+      });
+      return next;
+    });
+  }
+};
+
+const describeRewards = (rewards) => {
+  if (!rewards) {
+    return '';
+  }
+
+  const parts = [];
+  if (rewards.money) {
+    parts.push(`金額 $${rewards.money}`);
+  }
+  if (Array.isArray(rewards.seeds) && rewards.seeds.length > 0) {
+    const seedText = rewards.seeds
+      .map(seed => {
+        const crop = CROPS[seed.crop];
+        const label = crop ? `${crop.emoji} ${crop.name}種子` : `${seed.crop}種子`;
+        return `${label} x${seed.amount}`;
+      })
+      .join('、');
+    parts.push(seedText);
+  }
+  if (Array.isArray(rewards.supplies) && rewards.supplies.length > 0) {
+    const supplyText = rewards.supplies
+      .map(supply => {
+        const meta = FARM_SUPPLIES[supply.key];
+        const label = meta ? `${meta.emoji || '📦'} ${meta.name}` : supply.key;
+        return `${label} x${supply.amount}`;
+      })
+      .join('、');
+    parts.push(supplyText);
+  }
+  if (Array.isArray(rewards.boosts) && rewards.boosts.length > 0) {
+    const boostText = rewards.boosts
+      .map(boost => {
+        const crop = CROPS[boost.crop];
+        const percent = Math.round((boost.percent || 0) * 100);
+        const label = crop ? `${crop.emoji} ${crop.name}` : boost.crop;
+        return `${label} 價格永久 +${percent}%`;
+      })
+      .join('、');
+    parts.push(boostText);
+  }
+
+  return parts.join('、');
 };
 
 const FarmGame = () => {
@@ -121,6 +513,170 @@ const FarmGame = () => {
     [questManager, dynamicQuests],
   );
 
+  const handleDailyEvents = useCallback((newDay, effectiveSeason, currentWeather) => {
+    const dayInSeason = ((newDay - 1) % 30) + 1;
+
+    const existingSeasonal = Array.isArray(stateRef.current.seasonalEvents)
+      ? stateRef.current.seasonalEvents
+      : [];
+    const seasonalHistoryState = stateRef.current.seasonalEventHistory || {};
+    const activeSeasonal = [];
+    existingSeasonal.forEach(event => {
+      if ((event.expiresOn ?? 0) < newDay) {
+        if (!event.completed) {
+          addNotification(`⏳ ${event.name} 已結束，未來再參與吧！`, { type: 'warning' });
+        }
+      } else {
+        activeSeasonal.push(event);
+      }
+    });
+
+    let seasonalList = [...activeSeasonal];
+    const seasonalHistoryUpdates = {};
+
+    SEASONAL_FESTIVAL_DEFINITIONS.forEach(definition => {
+      if (definition.season !== effectiveSeason) {
+        return;
+      }
+      const scheduledDays = Array.isArray(definition.days) ? definition.days : [definition.days];
+      if (!scheduledDays.includes(dayInSeason)) {
+        return;
+      }
+      const cooldown = definition.cooldown ?? 0;
+      const lastTrigger = seasonalHistoryState[definition.id] || 0;
+      if (lastTrigger && newDay - lastTrigger < cooldown) {
+        return;
+      }
+      if (seasonalList.some(event => event.templateId === definition.id)) {
+        return;
+      }
+      const instance = {
+        ...definition,
+        templateId: definition.id,
+        instanceId: `${definition.id}_${newDay}`,
+        startedOn: newDay,
+        expiresOn: newDay + Math.max(1, (definition.duration ?? 2)) - 1,
+      };
+      seasonalList.push(instance);
+      seasonalHistoryUpdates[definition.id] = newDay;
+      const requirementLabel = (definition.requirements || []).map(resolveRequirementLabel).join('、');
+      addNotification(`🎊 ${definition.name} 開跑！${definition.description}${requirementLabel ? `（需求：${requirementLabel}）` : ''}`,
+        { type: 'info' });
+    });
+
+    setSeasonalEvents(seasonalList);
+    if (Object.keys(seasonalHistoryUpdates).length > 0) {
+      setSeasonalEventHistory(prev => ({ ...(prev || {}), ...seasonalHistoryUpdates }));
+    }
+
+    const existingWeatherMissions = Array.isArray(stateRef.current.weatherMissions)
+      ? stateRef.current.weatherMissions
+      : [];
+    const weatherHistoryState = stateRef.current.weatherMissionHistory || {};
+    const activeWeather = [];
+    existingWeatherMissions.forEach(mission => {
+      if ((mission.expiresOn ?? 0) < newDay) {
+        addNotification(`⏳ ${mission.name} 已截止。`, { type: 'warning' });
+      } else {
+        activeWeather.push(mission);
+      }
+    });
+
+    let weatherList = [...activeWeather];
+    const weatherHistoryUpdates = {};
+
+    WEATHER_MISSION_DEFINITIONS.forEach(definition => {
+      if (definition.weather !== currentWeather) {
+        return;
+      }
+      if (Array.isArray(definition.seasons) && !definition.seasons.includes(effectiveSeason)) {
+        return;
+      }
+      const cooldown = definition.cooldown ?? 0;
+      const lastTrigger = weatherHistoryState[definition.id] || 0;
+      if (lastTrigger && newDay - lastTrigger < cooldown) {
+        return;
+      }
+      if (weatherList.some(mission => mission.templateId === definition.id)) {
+        return;
+      }
+      const instance = {
+        ...definition,
+        templateId: definition.id,
+        instanceId: `${definition.id}_${newDay}`,
+        startedOn: newDay,
+        expiresOn: newDay + Math.max(1, (definition.duration ?? 2)) - 1,
+      };
+      weatherList.push(instance);
+      weatherHistoryUpdates[definition.id] = newDay;
+      const requirementLabel = (definition.requirements || []).map(resolveRequirementLabel).join('、');
+      addNotification(`🌦️ ${definition.name} 啟動：${definition.description}${requirementLabel ? `（需求：${requirementLabel}）` : ''}`,
+        { type: 'info' });
+    });
+
+    setWeatherMissions(weatherList);
+    if (Object.keys(weatherHistoryUpdates).length > 0) {
+      setWeatherMissionHistory(prev => ({ ...(prev || {}), ...weatherHistoryUpdates }));
+    }
+
+    const existingCommissions = Array.isArray(stateRef.current.marketCommissions)
+      ? stateRef.current.marketCommissions
+      : [];
+    const commissionHistoryState = stateRef.current.commissionHistory || {};
+    const activeCommissions = [];
+    existingCommissions.forEach(order => {
+      if ((order.expiresOn ?? 0) < newDay) {
+        addNotification(`📦 ${order.client} 的委託已過期。`, { type: 'warning' });
+      } else {
+        activeCommissions.push(order);
+      }
+    });
+
+    let commissionList = [...activeCommissions];
+    const commissionHistoryUpdates = {};
+
+    if (commissionList.length < MAX_ACTIVE_COMMISSIONS) {
+      const eligible = MARKET_COMMISSION_TEMPLATES.filter(template => {
+        if (Array.isArray(template.seasons) && !template.seasons.includes(effectiveSeason)) {
+          return false;
+        }
+        const lastTrigger = commissionHistoryState[template.id] || 0;
+        if (lastTrigger && newDay - lastTrigger < 5) {
+          return false;
+        }
+        if (commissionList.some(order => order.templateId === template.id)) {
+          return false;
+        }
+        return true;
+      });
+
+      const shuffled = [...eligible].sort(() => Math.random() - 0.5);
+      while (commissionList.length < MAX_ACTIVE_COMMISSIONS && shuffled.length > 0) {
+        const template = shuffled.shift();
+        if (!template) {
+          break;
+        }
+        const instance = {
+          ...template,
+          templateId: template.id,
+          instanceId: `${template.id}_${newDay}_${commissionList.length}`,
+          startedOn: newDay,
+          expiresOn: newDay + Math.max(1, (template.duration ?? 3)) - 1,
+        };
+        commissionList.push(instance);
+        commissionHistoryUpdates[template.id] = newDay;
+        const requirementLabel = (template.requirements || []).map(resolveRequirementLabel).join('、');
+        addNotification(`📝 ${template.client} 發布委託：${template.description}${requirementLabel ? `（需求：${requirementLabel}）` : ''}`,
+          { type: 'info' });
+      }
+    }
+
+    setMarketCommissions(commissionList);
+    if (Object.keys(commissionHistoryUpdates).length > 0) {
+      setCommissionHistory(prev => ({ ...(prev || {}), ...commissionHistoryUpdates }));
+    }
+  }, [addNotification, setSeasonalEvents, setSeasonalEventHistory, setWeatherMissions, setWeatherMissionHistory, setMarketCommissions, setCommissionHistory, stateRef]);
+
   useEffect(() => {
     questManager.refreshDaily(day);
   }, [questManager, day]);
@@ -165,7 +721,14 @@ const FarmGame = () => {
   const [marketUpdateTime, setMarketUpdateTime] = useState(null);
   const [dailyStats, setDailyStats] = useState([]);
   const [automation, setAutomation] = useState({ autoWater: false, autoHarvest: false });
-  
+  const [seasonalEvents, setSeasonalEvents] = useState([]);
+  const [seasonalEventHistory, setSeasonalEventHistory] = useState({});
+  const [weatherMissions, setWeatherMissions] = useState([]);
+  const [weatherMissionHistory, setWeatherMissionHistory] = useState({});
+  const [marketCommissions, setMarketCommissions] = useState([]);
+  const [commissionHistory, setCommissionHistory] = useState({});
+  const [marketBoosts, setMarketBoosts] = useState({});
+
   // 存檔狀態
   const [saveSlots, setSaveSlots] = useState({
     slot1: null,
@@ -204,6 +767,13 @@ const FarmGame = () => {
     previousMarketPrices,
     marketUpdateTime,
     saveSlots,
+    seasonalEvents,
+    seasonalEventHistory,
+    weatherMissions,
+    weatherMissionHistory,
+    marketCommissions,
+    commissionHistory,
+    marketBoosts,
     selectedSeed,
     selectedSupply,
     loadData,
@@ -243,6 +813,13 @@ const FarmGame = () => {
       setPreviousMarketPrices,
       setMarketUpdateTime,
       setSaveSlots,
+      setSeasonalEvents,
+      setSeasonalEventHistory,
+      setWeatherMissions,
+      setWeatherMissionHistory,
+      setMarketCommissions,
+      setCommissionHistory,
+      setMarketBoosts,
       setShowSaveMenu,
       setShowLoadMenu,
       setLoadData,
@@ -595,10 +1172,12 @@ const FarmGame = () => {
     const updatePrices = () => {
       const previousSnapshot = stateRef.current.marketPrices || {};
       const newPrices = {};
+      const boosts = stateRef.current.marketBoosts || {};
       Object.keys(CROPS).forEach(crop => {
         const basePrice = CROPS[crop].sellPrice;
         const fluctuation = 0.8 + Math.random() * 0.4;
-        newPrices[crop] = Math.floor(basePrice * fluctuation);
+        const boostMultiplier = 1 + (boosts[crop] || 0);
+        newPrices[crop] = Math.floor(basePrice * fluctuation * boostMultiplier);
       });
       setPreviousMarketPrices(previousSnapshot);
       setMarketPrices(newPrices);
@@ -608,7 +1187,7 @@ const FarmGame = () => {
     updatePrices();
     const timer = setInterval(updatePrices, 120000);
     return () => clearInterval(timer);
-  }, [stateRef]);
+  }, [stateRef, marketBoosts]);
 
   // 成就系統
   useEffect(() => {
@@ -652,17 +1231,23 @@ const FarmGame = () => {
       setTime(prev => {
         const newTime = prev + 1;
         if (newTime >= 24) {
-          setDay(prevDay => {
-            const newDay = prevDay + 1;
-            if (newDay % 30 === 0) {
-              const currentSeasonIndex = SEASONS.indexOf(season);
-              const nextSeason = SEASONS[(currentSeasonIndex + 1) % SEASONS.length];
-              setSeason(nextSeason);
-              addNotification(`🌸 季節變為 ${GameFormatter.seasonName(nextSeason)}！`, { type: 'info' });
-            }
-            return newDay;
-          });
-          
+          const currentDay = stateRef.current.day || day;
+          const currentSeason = stateRef.current.season || season;
+          const currentWeather = stateRef.current.weather || weather;
+          const upcomingDay = currentDay + 1;
+          const willChangeSeason = upcomingDay % 30 === 0;
+          const currentSeasonIndex = SEASONS.indexOf(currentSeason);
+          const nextSeasonValue = willChangeSeason
+            ? SEASONS[(currentSeasonIndex + 1) % SEASONS.length]
+            : currentSeason;
+
+          setDay(upcomingDay);
+          if (willChangeSeason) {
+            setSeason(nextSeasonValue);
+            addNotification(`🌸 季節變為 ${GameFormatter.seasonName(nextSeasonValue)}！`, { type: 'info' });
+          }
+
+          handleDailyEvents(upcomingDay, nextSeasonValue, currentWeather);
           setEnergy(100);
 
           // 動物每日狀態與收入結算
@@ -681,6 +1266,10 @@ const FarmGame = () => {
             const outbreakVictims = [];
             const overcrowdAlerts = [];
             const newbornAnimals = [];
+            const careReminders = [];
+            const careWarnings = [];
+            const dirtyPens = [];
+            const filthyPens = [];
             const breedingPools = {};
             const capacityLimit = Math.max(animalCapacity || BASE_ANIMAL_CAPACITY, BASE_ANIMAL_CAPACITY);
 
@@ -708,6 +1297,60 @@ const FarmGame = () => {
               let sick = Boolean(animal.sick);
               const wasSick = Boolean(animal.sick);
               let sicknessDays = animal.sicknessDays ?? (wasSick ? 1 : 0);
+
+              let bond = Math.max(0, animal.bond ?? 0);
+              bond = Math.max(0, Math.min(100, bond - ANIMAL_INTERACTION_CONFIG.bondDecay));
+              let cleanliness = Math.max(0, animal.cleanliness ?? 80);
+              cleanliness = Math.max(0, Math.min(100, cleanliness - ANIMAL_INTERACTION_CONFIG.cleanlinessDecay));
+
+              let careNeed = animal.careNeed && ANIMAL_CARE_ACTIONS[animal.careNeed] ? animal.careNeed : null;
+              let careDays = Math.max(0, animal.careDays ?? 0);
+              const careKeys = Object.keys(ANIMAL_CARE_ACTIONS);
+              const prioritizeCleaning = cleanliness < ANIMAL_INTERACTION_CONFIG.cleanlinessThreshold && ANIMAL_CARE_ACTIONS.cleanPen;
+
+              if (!careNeed && careKeys.length > 0) {
+                if (prioritizeCleaning) {
+                  careNeed = 'cleanPen';
+                  careDays = 1;
+                } else if (Math.random() < ANIMAL_INTERACTION_CONFIG.dailyNeedChance) {
+                  const randomKey = careKeys[Math.floor(Math.random() * careKeys.length)];
+                  careNeed = randomKey;
+                  careDays = 1;
+                } else {
+                  careDays = 0;
+                }
+
+                if (careNeed) {
+                  const meta = ANIMAL_CARE_ACTIONS[careNeed];
+                  if (meta) {
+                    careReminders.push(`${animal.name} 想要${meta.shortLabel}`);
+                  }
+                }
+              } else if (careNeed) {
+                const meta = ANIMAL_CARE_ACTIONS[careNeed];
+                careDays = Math.max(1, careDays + 1);
+                if (meta) {
+                  careReminders.push(`${animal.name} 需要${meta.shortLabel}`);
+                  if (careDays >= 2) {
+                    const penalty = careDays >= 3
+                      ? ANIMAL_INTERACTION_CONFIG.escalatedPenalty
+                      : ANIMAL_INTERACTION_CONFIG.skipHappinessPenalty;
+                    happiness = Math.max(0, happiness - penalty);
+                    bond = Math.max(0, bond - ANIMAL_INTERACTION_CONFIG.neglectBondPenalty);
+                    if (careDays >= 3) {
+                      careWarnings.push(`${animal.name}（${meta.shortLabel}）`);
+                    }
+                    const sicknessChance = ANIMAL_INTERACTION_CONFIG.neglectSicknessChance * Math.max(1, careDays - 1);
+                    if (!sick && Math.random() < sicknessChance) {
+                      sick = true;
+                      newlySick.push(animal.name);
+                    }
+                  }
+                }
+              } else {
+                careDays = 0;
+              }
+
               let canProduce = happiness > 25 && hunger > ANIMAL_ECOLOGY_CONFIG.hungerWarningThreshold;
 
               if (hunger <= ANIMAL_ECOLOGY_CONFIG.severeHungerThreshold) {
@@ -723,6 +1366,20 @@ const FarmGame = () => {
               if (!sick && (hunger <= ANIMAL_ECOLOGY_CONFIG.sicknessTriggerThreshold || happiness <= ANIMAL_ECOLOGY_CONFIG.sicknessTriggerThreshold)) {
                 sick = true;
                 newlySick.push(animal.name);
+              }
+
+              if (cleanliness < ANIMAL_INTERACTION_CONFIG.cleanlinessThreshold) {
+                dirtyPens.push(animal.name);
+                happiness = Math.max(0, happiness - ANIMAL_INTERACTION_CONFIG.cleanlinessHappinessPenalty);
+              }
+              if (cleanliness < ANIMAL_INTERACTION_CONFIG.severeCleanlinessThreshold) {
+                filthyPens.push(animal.name);
+                happiness = Math.max(0, happiness - ANIMAL_INTERACTION_CONFIG.severeCleanlinessPenalty);
+                bond = Math.max(0, bond - 1);
+                if (!sick && Math.random() < ANIMAL_INTERACTION_CONFIG.cleanlinessSicknessChance) {
+                  sick = true;
+                  newlySick.push(animal.name);
+                }
               }
 
               if (sick) {
@@ -765,7 +1422,7 @@ const FarmGame = () => {
                 if (!breedingPools[animal.type]) {
                   breedingPools[animal.type] = [];
                 }
-                breedingPools[animal.type].push({ happiness, hunger });
+                breedingPools[animal.type].push({ happiness, hunger, bond });
               }
 
               list.push({
@@ -775,6 +1432,10 @@ const FarmGame = () => {
                 sick,
                 sicknessDays,
                 productReady,
+                bond: Math.max(0, Math.min(100, bond)),
+                cleanliness: Math.max(0, Math.min(100, cleanliness)),
+                careNeed: careNeed || null,
+                careDays: careNeed ? careDays : 0,
               });
               return list;
             }, []);
@@ -843,10 +1504,12 @@ const FarmGame = () => {
 
               const averageHappiness = candidates.reduce((sum, entry) => sum + entry.happiness, 0) / candidates.length;
               const averageHunger = candidates.reduce((sum, entry) => sum + entry.hunger, 0) / candidates.length;
+              const averageBond = candidates.reduce((sum, entry) => sum + (entry.bond ?? 0), 0) / candidates.length;
               const pairCount = Math.min(Math.floor(candidates.length / 2), ANIMAL_ECOLOGY_CONFIG.breeding.maxPairsPerType);
               const chance = ANIMAL_ECOLOGY_CONFIG.breeding.baseChance
                 + Math.max(0, (averageHappiness - ANIMAL_ECOLOGY_CONFIG.breeding.happyThreshold) * ANIMAL_ECOLOGY_CONFIG.breeding.happinessWeight)
-                + Math.max(0, (averageHunger - ANIMAL_ECOLOGY_CONFIG.breeding.wellFedThreshold) * ANIMAL_ECOLOGY_CONFIG.breeding.hungerWeight);
+                + Math.max(0, (averageHunger - ANIMAL_ECOLOGY_CONFIG.breeding.wellFedThreshold) * ANIMAL_ECOLOGY_CONFIG.breeding.hungerWeight)
+                + Math.max(0, (averageBond - ANIMAL_ECOLOGY_CONFIG.breeding.bondThreshold) * ANIMAL_ECOLOGY_CONFIG.breeding.bondWeight);
 
               for (let attempt = 0; attempt < pairCount && availableSlots > 0; attempt += 1) {
                 if (Math.random() < chance) {
@@ -864,6 +1527,11 @@ const FarmGame = () => {
                     sicknessDays: 0,
                     name: babyName,
                     productReady: 0,
+                    bond: 35,
+                    cleanliness: 82,
+                    careNeed: null,
+                    careDays: 0,
+                    lastCareTime: null,
                   });
                   availableSlots -= 1;
                 }
@@ -909,12 +1577,34 @@ const FarmGame = () => {
               addNotification('🐏 動物棲位過於擁擠，建議擴建欄舍或調整飼養量！', { type: 'warning' });
             }
 
+            if (careReminders.length > 0) {
+              const reminders = Array.from(new Set(careReminders));
+              addNotification(`🐾 ${reminders.join('、')}，多陪陪牠們吧！`, { type: 'info' });
+            }
+
+            if (careWarnings.length > 0) {
+              const warnings = Array.from(new Set(careWarnings));
+              addNotification(`⚠️ ${warnings.join('、')} 渴望照護，再忽略可能會生病！`, { type: 'warning' });
+            }
+
+            const urgentDirty = Array.from(new Set(filthyPens));
+            if (urgentDirty.length > 0) {
+              addNotification(`🧼 ${urgentDirty.join('、')} 的欄舍太髒亂了，立即清理以避免疾病！`, { type: 'error' });
+            }
+
+            const regularDirty = Array.from(new Set(dirtyPens.filter(name => !filthyPens.includes(name))));
+            if (regularDirty.length > 0) {
+              addNotification(`🧹 ${regularDirty.join('、')} 的欄舍需要整理，保持清潔讓牠們更安心。`, { type: 'warning' });
+            }
+
             if (newbornAnimals.length > 0) {
               const names = newbornAnimals.map(animal => animal.name).join('、');
               addNotification(`🐣 ${names} 出生了，農場又更熱鬧了！`, { type: 'success' });
             }
 
-            return [...processedAnimals, ...newbornAnimals];
+            const nextAnimals = [...processedAnimals, ...newbornAnimals];
+            stateRef.current.animals = nextAnimals;
+            return nextAnimals;
           });
 
           if (Object.keys(producedGoods).length > 0) {
@@ -1071,7 +1761,9 @@ const FarmGame = () => {
               });
             }
 
-            return changed ? processedFarm : prevFarm;
+            const resultFarm = changed ? processedFarm : prevFarm;
+            stateRef.current.farm = resultFarm;
+            return resultFarm;
           });
 
           if (infestedCrops.length > 0) {
@@ -1111,7 +1803,7 @@ const FarmGame = () => {
     }, 15000);
 
     return () => clearInterval(timer);
-  }, [season, buildings, animals, addNotification, gameEngine, animalCapacity]);
+  }, [season, buildings, animals, addNotification, gameEngine, animalCapacity, handleDailyEvents, day, weather]);
 
   // 天氣系統
   useEffect(() => {
@@ -1133,26 +1825,30 @@ const FarmGame = () => {
   // 作物成長系統
   useEffect(() => {
     const growTimer = setInterval(() => {
-      setFarm(prev => prev.map(plot => {
-        if (plot.crop && plot.plantTime && !plot.pest) {
-          const now = Date.now();
-          const cropData = CROPS[plot.crop];
+      setFarm(prev => {
+        const updatedFarm = prev.map(plot => {
+          if (plot.crop && plot.plantTime && !plot.pest) {
+            const now = Date.now();
+            const cropData = CROPS[plot.crop];
 
-          let weatherMultiplier = plot.greenhouse ? 1.2 : (cropData.weatherBonus[weather] || 1);
-          const seasonMultiplier = plot.greenhouse ? 1 : (cropData.seasonBonus?.[season] ?? 1);
-          const toolMultiplier = effectiveToolStats.speedBoost;
-          const fertilizerBoost = plot.fertilized ? 1.25 : 1;
+            let weatherMultiplier = plot.greenhouse ? 1.2 : (cropData.weatherBonus[weather] || 1);
+            const seasonMultiplier = plot.greenhouse ? 1 : (cropData.seasonBonus?.[season] ?? 1);
+            const toolMultiplier = effectiveToolStats.speedBoost;
+            const fertilizerBoost = plot.fertilized ? 1.25 : 1;
 
-          const adjustedGrowTime = (cropData.growTime * 60000)
-            / (weatherMultiplier * toolMultiplier * fertilizerBoost * seasonMultiplier);
+            const adjustedGrowTime = (cropData.growTime * 60000)
+              / (weatherMultiplier * toolMultiplier * fertilizerBoost * seasonMultiplier);
 
-          if (now - plot.plantTime >= adjustedGrowTime && !plot.ready) {
-            addNotification(`${cropData.emoji} ${cropData.name} 成熟了！`, { type: 'success' });
-            return { ...plot, ready: true };
+            if (now - plot.plantTime >= adjustedGrowTime && !plot.ready) {
+              addNotification(`${cropData.emoji} ${cropData.name} 成熟了！`, { type: 'success' });
+              return { ...plot, ready: true };
+            }
           }
-        }
-        return plot;
-      }));
+          return plot;
+        });
+        stateRef.current.farm = updatedFarm;
+        return updatedFarm;
+      });
     }, 5000);
 
     return () => clearInterval(growTimer);
@@ -1215,8 +1911,8 @@ const FarmGame = () => {
     gameEngine.buyBuilding(buildingType);
   }, [gameEngine]);
 
-  const buyTool = useCallback((toolType) => {
-    gameEngine.buyTool(toolType);
+  const buyTool = useCallback((toolType, options = {}) => {
+    gameEngine.buyTool(toolType, options);
   }, [gameEngine]);
 
   const slaughterAnimal = useCallback((animalId) => {
@@ -1246,6 +1942,81 @@ const FarmGame = () => {
   const treatAnimal = useCallback((animalId) => {
     gameEngine.treatAnimal(animalId);
   }, [gameEngine]);
+
+  const careForAnimal = useCallback((animalId, actionKey) => {
+    gameEngine.careForAnimal(animalId, actionKey);
+  }, [gameEngine]);
+
+  const completeSeasonalEvent = useCallback((instanceId) => {
+    const currentEvents = Array.isArray(stateRef.current.seasonalEvents)
+      ? stateRef.current.seasonalEvents
+      : [];
+    const target = currentEvents.find(event => event.instanceId === instanceId);
+    if (!target) {
+      return;
+    }
+
+    const currentInventory = stateRef.current.inventory || inventory;
+    const currentSupplies = stateRef.current.farmSupplies || farmSupplies;
+    if (!canFulfillRequirements(target.requirements, currentInventory, currentSupplies)) {
+      addNotification('庫存不足，暫時無法支援這項活動。', { type: 'warning' });
+      return;
+    }
+
+    applyRequirementSpending(target.requirements, setInventory, setFarmSupplies);
+    applyRewardGrant(target, { setMoney, setInventory, setFarmSupplies, setMarketBoosts });
+    setSeasonalEvents(prev => prev.filter(event => event.instanceId !== instanceId));
+    const rewardSummary = describeRewards(target.rewards);
+    addNotification(`🎉 已支援 ${target.name}！${rewardSummary ? `獲得 ${rewardSummary}` : '村民們十分感謝你的協助！'}`,
+      { type: 'success' });
+  }, [stateRef, inventory, farmSupplies, addNotification, setInventory, setFarmSupplies, setSeasonalEvents, setMoney, setMarketBoosts]);
+
+  const completeWeatherMission = useCallback((instanceId) => {
+    const currentMissions = Array.isArray(stateRef.current.weatherMissions)
+      ? stateRef.current.weatherMissions
+      : [];
+    const target = currentMissions.find(mission => mission.instanceId === instanceId);
+    if (!target) {
+      return;
+    }
+
+    const currentInventory = stateRef.current.inventory || inventory;
+    const currentSupplies = stateRef.current.farmSupplies || farmSupplies;
+    if (!canFulfillRequirements(target.requirements, currentInventory, currentSupplies)) {
+      addNotification('準備的物資不足，無法完成這項天氣任務。', { type: 'warning' });
+      return;
+    }
+
+    applyRequirementSpending(target.requirements, setInventory, setFarmSupplies);
+    applyRewardGrant(target, { setMoney, setInventory, setFarmSupplies, setMarketBoosts });
+    setWeatherMissions(prev => prev.filter(mission => mission.instanceId !== instanceId));
+    const rewardSummary = describeRewards(target.rewards);
+    addNotification(`✅ 已完成「${target.name}」，${rewardSummary ? `獎勵：${rewardSummary}` : '村務局派人表達謝意！'}`,
+      { type: 'success' });
+  }, [stateRef, inventory, farmSupplies, addNotification, setInventory, setFarmSupplies, setWeatherMissions, setMoney, setMarketBoosts]);
+
+  const fulfillMarketCommission = useCallback((instanceId) => {
+    const currentOrders = Array.isArray(stateRef.current.marketCommissions)
+      ? stateRef.current.marketCommissions
+      : [];
+    const target = currentOrders.find(order => order.instanceId === instanceId);
+    if (!target) {
+      return;
+    }
+
+    const currentInventory = stateRef.current.inventory || inventory;
+    const currentSupplies = stateRef.current.farmSupplies || farmSupplies;
+    if (!canFulfillRequirements(target.requirements, currentInventory, currentSupplies)) {
+      addNotification('倉庫存量不足，無法交付這筆委託。', { type: 'warning' });
+      return;
+    }
+
+    applyRequirementSpending(target.requirements, setInventory, setFarmSupplies);
+    applyRewardGrant(target, { setMoney, setInventory, setFarmSupplies, setMarketBoosts });
+    setMarketCommissions(prev => prev.filter(order => order.instanceId !== instanceId));
+    const rewardSummary = describeRewards(target.rewards);
+    addNotification(`📦 已完成 ${target.client} 的委託！${rewardSummary ? `獲得 ${rewardSummary}` : ''}`, { type: 'success' });
+  }, [stateRef, inventory, farmSupplies, addNotification, setInventory, setFarmSupplies, setMarketCommissions, setMoney, setMarketBoosts]);
 
   const interactNPC = (npc) => {
     setCurrentNPC(npc);
@@ -1541,6 +2312,12 @@ const FarmGame = () => {
                     const productInfo = animalData.product ? ANIMAL_PRODUCTS[animalData.product] : null;
                     const readyCount = Math.max(0, Math.floor(animal.productReady || 0));
                     const canCollectProduct = Boolean(productInfo) && readyCount > 0;
+                    const bondValue = Math.max(0, Math.round(animal.bond ?? 0));
+                    const cleanlinessValue = Math.max(0, Math.round(animal.cleanliness ?? 0));
+                    const careNeed = animal.careNeed;
+                    const careMeta = careNeed ? ANIMAL_CARE_ACTIONS[careNeed] : null;
+                    const careDays = Math.max(0, animal.careDays ?? 0);
+                    const careUrgent = careDays >= 3;
                     return (
                       <div key={animal.id}
                            className={`rounded-lg p-3 transition-colors relative border ${
@@ -1583,6 +2360,51 @@ const FarmGame = () => {
                               <div className={`h-1 rounded-full transition-all duration-300 ${isHungry ? 'bg-orange-400' : 'bg-yellow-400'}`}
                                    style={{ width: `${Math.max(0, Math.min(100, hunger))}%` }}></div>
                             </div>
+                            <div className="flex items-center justify-center gap-1 mt-2">
+                              <Sparkles className="w-3 h-3 text-purple-400" />
+                              <span>羈絆 {bondValue}/100</span>
+                            </div>
+                            <div className="bg-gray-200 rounded-full h-1">
+                              <div className="bg-purple-400 h-1 rounded-full transition-all duration-300"
+                                   style={{ width: `${Math.min(100, bondValue)}%` }}></div>
+                            </div>
+                            <div className="flex items-center justify-center gap-1 mt-2">
+                              <Droplets className={`w-3 h-3 ${cleanlinessValue < 30 ? 'text-red-500' : cleanlinessValue < 60 ? 'text-yellow-500' : 'text-teal-500'}`} />
+                              <span>整潔 {cleanlinessValue}%</span>
+                            </div>
+                            <div className="bg-gray-200 rounded-full h-1">
+                              <div className={`h-1 rounded-full transition-all duration-300 ${cleanlinessValue < 30 ? 'bg-red-400' : cleanlinessValue < 60 ? 'bg-yellow-400' : 'bg-teal-400'}`}
+                                   style={{ width: `${Math.min(100, cleanlinessValue)}%` }}></div>
+                            </div>
+                          </div>
+                          <div className={`text-xs mt-2 ${careNeed ? (careUrgent ? 'text-red-600 font-semibold' : 'text-purple-700') : 'text-emerald-600'}`}>
+                            {careNeed
+                              ? `需要：${careMeta?.shortLabel || careMeta?.label || '照護'}${careDays > 1 ? `（等待第 ${careDays} 天）` : ''}`
+                              : '狀態穩定，感謝你的照顧！'}
+                          </div>
+                          <div className="grid grid-cols-3 gap-1 mt-2">
+                            {Object.values(ANIMAL_CARE_ACTIONS).map(action => {
+                              const isRequested = careNeed === action.key;
+                              const insufficientEnergy = energy < action.energyCost;
+                              return (
+                                <button
+                                  key={action.key}
+                                  type="button"
+                                  onClick={() => careForAnimal(animal.id, action.key)}
+                                  disabled={insufficientEnergy}
+                                  title={action.description}
+                                  className={`text-[10px] font-semibold py-1 rounded transition-colors ${insufficientEnergy
+                                    ? 'bg-purple-50 text-purple-300 cursor-not-allowed opacity-60'
+                                    : isRequested
+                                      ? 'bg-purple-400 hover:bg-purple-500 text-purple-900'
+                                      : 'bg-purple-100 hover:bg-purple-200 text-purple-700'
+                                  }`}
+                                >
+                                  {action.shortLabel || action.label}
+                                  <span className="block text-[9px] font-normal">體力 -{action.energyCost}</span>
+                                </button>
+                              );
+                            })}
                           </div>
                           {productInfo ? (
                             <div className="text-xs text-amber-600">
@@ -1803,6 +2625,142 @@ const FarmGame = () => {
               </div>
             </div>
 
+            {/* 季節活動中心 */}
+            <div className="bg-white bg-opacity-90 rounded-lg p-4 shadow-lg">
+              <h3 className="text-lg font-bold flex items-center gap-2 mb-3">
+                <Sparkles className="w-4 h-4 text-amber-500" />
+                季節活動中心
+              </h3>
+              {seasonalEvents.length === 0 && weatherMissions.length === 0 ? (
+                <p className="text-sm text-gray-500">
+                  目前沒有特別活動，專心耕作並等待下一波慶典與任務吧！
+                </p>
+              ) : (
+                <div className="space-y-4">
+                  {seasonalEvents.length > 0 && (
+                    <div>
+                      <h4 className="text-sm font-semibold text-amber-600 mb-2">季節慶典</h4>
+                      <div className="space-y-2">
+                        {seasonalEvents.map(event => {
+                          const requirements = event.requirements || [];
+                          const canComplete = canFulfillRequirements(requirements, inventory, farmSupplies);
+                          const daysLeft = Math.max(0, (event.expiresOn ?? day) - day + 1);
+                          const rewardSummary = describeRewards(event.rewards);
+                          return (
+                            <div key={event.instanceId}
+                                 className="border border-amber-200 bg-amber-50/70 rounded-lg p-3">
+                              <div className="flex items-start justify-between gap-2">
+                                <div>
+                                  <p className="text-sm font-semibold text-amber-700 leading-snug">{event.name}</p>
+                                  <p className="text-xs text-gray-600 mt-1">{event.description}</p>
+                                </div>
+                                <span className={`text-[11px] px-2 py-1 rounded-full ${daysLeft <= 1 ? 'bg-red-100 text-red-600' : 'bg-amber-100 text-amber-700'}`}>
+                                  剩餘 {daysLeft} 天
+                                </span>
+                              </div>
+                              {requirements.length > 0 && (
+                                <ul className="mt-2 space-y-1">
+                                  {requirements.map((requirement, index) => {
+                                    const owned = getRequirementCurrentAmount(requirement, inventory, farmSupplies);
+                                    const goal = requirement.amount || 0;
+                                    const label = resolveRequirementLabel(requirement);
+                                    const met = owned >= goal;
+                                    return (
+                                      <li key={`${event.instanceId}-req-${index}`}
+                                          className="flex items-center justify-between text-xs text-gray-600">
+                                        <span>{label}</span>
+                                        <span className={met ? 'text-green-600 font-semibold' : 'text-gray-500'}>
+                                          {owned}/{goal}
+                                        </span>
+                                      </li>
+                                    );
+                                  })}
+                                </ul>
+                              )}
+                              {rewardSummary && (
+                                <p className="mt-2 text-xs text-amber-700">獎勵：{rewardSummary}</p>
+                              )}
+                              <div className="mt-3 flex justify-end">
+                                <button
+                                  onClick={() => completeSeasonalEvent(event.instanceId)}
+                                  disabled={!canComplete}
+                                  className={`text-xs font-semibold px-3 py-1 rounded transition-colors ${canComplete
+                                    ? 'bg-amber-500 text-white hover:bg-amber-600'
+                                    : 'bg-gray-200 text-gray-400 cursor-not-allowed'}`}
+                                >
+                                  提供支援
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                  {weatherMissions.length > 0 && (
+                    <div>
+                      <h4 className="text-sm font-semibold text-sky-600 mb-2">天氣任務</h4>
+                      <div className="space-y-2">
+                        {weatherMissions.map(mission => {
+                          const requirements = mission.requirements || [];
+                          const canComplete = canFulfillRequirements(requirements, inventory, farmSupplies);
+                          const daysLeft = Math.max(0, (mission.expiresOn ?? day) - day + 1);
+                          const rewardSummary = describeRewards(mission.rewards);
+                          return (
+                            <div key={mission.instanceId}
+                                 className="border border-sky-200 bg-sky-50/70 rounded-lg p-3">
+                              <div className="flex items-start justify-between gap-2">
+                                <div>
+                                  <p className="text-sm font-semibold text-sky-700 leading-snug">{mission.name}</p>
+                                  <p className="text-xs text-gray-600 mt-1">{mission.description}</p>
+                                </div>
+                                <span className={`text-[11px] px-2 py-1 rounded-full ${daysLeft <= 1 ? 'bg-red-100 text-red-600' : 'bg-sky-100 text-sky-700'}`}>
+                                  剩餘 {daysLeft} 天
+                                </span>
+                              </div>
+                              {requirements.length > 0 && (
+                                <ul className="mt-2 space-y-1">
+                                  {requirements.map((requirement, index) => {
+                                    const owned = getRequirementCurrentAmount(requirement, inventory, farmSupplies);
+                                    const goal = requirement.amount || 0;
+                                    const label = resolveRequirementLabel(requirement);
+                                    const met = owned >= goal;
+                                    return (
+                                      <li key={`${mission.instanceId}-req-${index}`}
+                                          className="flex items-center justify-between text-xs text-gray-600">
+                                        <span>{label}</span>
+                                        <span className={met ? 'text-green-600 font-semibold' : 'text-gray-500'}>
+                                          {owned}/{goal}
+                                        </span>
+                                      </li>
+                                    );
+                                  })}
+                                </ul>
+                              )}
+                              {rewardSummary && (
+                                <p className="mt-2 text-xs text-sky-700">獎勵：{rewardSummary}</p>
+                              )}
+                              <div className="mt-3 flex justify-end">
+                                <button
+                                  onClick={() => completeWeatherMission(mission.instanceId)}
+                                  disabled={!canComplete}
+                                  className={`text-xs font-semibold px-3 py-1 rounded transition-colors ${canComplete
+                                    ? 'bg-sky-500 text-white hover:bg-sky-600'
+                                    : 'bg-gray-200 text-gray-400 cursor-not-allowed'}`}
+                                >
+                                  完成任務
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
             {/* 市場價格 */}
             <div className="bg-white bg-opacity-90 rounded-lg p-4 shadow-lg">
               <div className="flex flex-wrap items-start justify-between gap-2 mb-3">
@@ -1844,6 +2802,73 @@ const FarmGame = () => {
                     style={{ width: `${Math.min(100, Math.max(6, marketInsights.averageIndex * 100))}%` }}
                   ></div>
                 </div>
+              </div>
+              <div className="mb-3 border border-emerald-200 bg-emerald-50/70 rounded-lg p-3">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-1 text-xs font-semibold text-emerald-700 uppercase tracking-wide">
+                    <Boxes className="w-3 h-3" />
+                    市場委託
+                  </div>
+                  <span className="text-[11px] text-emerald-700">活躍 {marketCommissions.length}/{MAX_ACTIVE_COMMISSIONS}</span>
+                </div>
+                {marketCommissions.length > 0 ? (
+                  <div className="space-y-2">
+                    {marketCommissions.map(order => {
+                      const requirements = order.requirements || [];
+                      const canComplete = canFulfillRequirements(requirements, inventory, farmSupplies);
+                      const daysLeft = Math.max(0, (order.expiresOn ?? day) - day + 1);
+                      const rewardSummary = describeRewards(order.rewards);
+                      return (
+                        <div key={order.instanceId} className="border border-emerald-200 bg-white/80 rounded-lg p-3">
+                          <div className="flex items-start justify-between gap-2">
+                            <div>
+                              <p className="text-sm font-semibold text-emerald-700">{order.client}</p>
+                              <p className="text-xs text-gray-600 mt-1 leading-snug">{order.description}</p>
+                            </div>
+                            <span className={`text-[11px] px-2 py-1 rounded-full ${daysLeft <= 1 ? 'bg-red-100 text-red-600' : 'bg-emerald-100 text-emerald-700'}`}>
+                              剩餘 {daysLeft} 天
+                            </span>
+                          </div>
+                          {requirements.length > 0 && (
+                            <ul className="mt-2 space-y-1">
+                              {requirements.map((requirement, index) => {
+                                const owned = getRequirementCurrentAmount(requirement, inventory, farmSupplies);
+                                const goal = requirement.amount || 0;
+                                const label = resolveRequirementLabel(requirement);
+                                const met = owned >= goal;
+                                return (
+                                  <li key={`${order.instanceId}-req-${index}`}
+                                      className="flex items-center justify-between text-xs text-gray-600">
+                                    <span>{label}</span>
+                                    <span className={met ? 'text-green-600 font-semibold' : 'text-gray-500'}>
+                                      {owned}/{goal}
+                                    </span>
+                                  </li>
+                                );
+                              })}
+                            </ul>
+                          )}
+                          {rewardSummary && (
+                            <p className="mt-2 text-xs text-emerald-700">獎勵：{rewardSummary}</p>
+                          )}
+                          <div className="mt-3 flex justify-end">
+                            <button
+                              onClick={() => fulfillMarketCommission(order.instanceId)}
+                              disabled={!canComplete}
+                              className={`text-xs font-semibold px-3 py-1 rounded transition-colors ${canComplete
+                                ? 'bg-emerald-500 text-white hover:bg-emerald-600'
+                                : 'bg-gray-200 text-gray-400 cursor-not-allowed'}`}
+                            >
+                              交付委託
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <p className="text-xs text-gray-500">今日暫無委託訂單，靜候新的需求。</p>
+                )}
               </div>
               {marketView === 'summary' ? (
                 <>
@@ -2181,7 +3206,7 @@ const FarmGame = () => {
                       倉庫種子: {inventory[`seed_${selectedSeed}`] || 0} 包
                     </div>
                     <div className="text-xs text-gray-500">
-                      無庫存時植入需花費 ${marketPrices[selectedSeed] || CROPS[selectedSeed].price}
+                      無庫存時植入需花費 ${CROPS[selectedSeed].price}
                     </div>
                   </div>
                 </div>
@@ -2293,7 +3318,8 @@ const FarmGame = () => {
             <h2 className="text-xl font-bold mb-4">種子商店</h2>
             <div className="grid grid-cols-3 gap-4">
               {Object.entries(CROPS).map(([key, crop]) => {
-                const price = marketPrices[key] || crop.price;
+                const seedCost = crop.price;
+                const marketValue = marketPrices[key] || crop.sellPrice;
                 const seedKey = `seed_${key}`;
                 const storedSeeds = inventory[seedKey] || 0;
                 const seasonEntries = Object.entries(crop.seasonBonus || {});
@@ -2310,9 +3336,10 @@ const FarmGame = () => {
                     <div className="text-center space-y-1">
                       <div className="text-3xl">{crop.emoji}</div>
                       <div className="font-semibold">{crop.name}</div>
-                      <div className="text-green-600 font-bold">${price}</div>
+                      <div className="text-green-600 font-bold">種子 ${seedCost}</div>
                       <div className="text-xs text-gray-500">成長: {crop.growTime}分鐘</div>
                       <div className="text-xs text-blue-600">基礎售價: ${crop.sellPrice}</div>
+                      <div className="text-xs text-emerald-600">今日市價: ${marketValue}</div>
                       <div className="text-xs text-amber-600">種子庫存: {storedSeeds} 包</div>
                       {favorableSeasons.length > 0 && (
                         <div className="text-[11px] text-emerald-600">適合季節：{favorableSeasons.join('、')}</div>
@@ -2515,8 +3542,8 @@ const FarmGame = () => {
                 const displayLevel = ownedLevel + 1;
                 const displaySpeed = (tool.speedBoost || 1) + (tool.speedUpgrade || 0) * ownedLevel;
                 const displayEnergy = (tool.energyReduction || 0) + (tool.energyUpgrade || 0) * ownedLevel;
-                const nextUpgradeCost = tool.upgradeCost;
-                const canUpgrade = isOwned && Boolean(nextUpgradeCost);
+                const nextUpgradeCost = gameEngine.getToolUpgradeCost(key, ownedLevel);
+                const canUpgrade = isOwned && nextUpgradeCost !== null;
                 const cardClass = isActive
                   ? 'bg-green-100 border-green-400'
                   : isOwned
@@ -2570,7 +3597,7 @@ const FarmGame = () => {
                             buyTool(key, { upgrade: true });
                           }}
                         >
-                          升級 ${nextUpgradeCost}
+                          {`升級 $${nextUpgradeCost}`}
                         </button>
                       </div>
                     )}

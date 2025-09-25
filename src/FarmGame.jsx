@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import {
   Sprout, Coins, ShoppingCart, Heart, Home, Sun, Moon, Zap, Droplets, Hammer,
-  Building, Star, Leaf, Seedling, Plus, Minus, ChevronRight, Wind, Factory
+  Building, Star, Leaf, Seedling, Plus, Minus, ChevronRight, Wind, Factory, ScrollText
 } from 'lucide-react'
 
 /** ---------- 基礎資料 ---------- */
@@ -26,21 +26,198 @@ const ANIMALS = {
 }
 
 const BUILDINGS = {
-  barn:         { name: '穀倉',      price: 1000, emoji: '🏚️', description: '容納牛羊，提升產量', boost: 1.2 },
-  chickenCoop:  { name: '雞舍',      price: 500,  emoji: '🏠', description: '專門養雞，提升產蛋率', boost: 1.3 },
-  dogHouse:     { name: '狗屋',      price: 300,  emoji: '🏘️', description: '狗狗的溫馨小窩',    boost: 1.1 },
-  catHouse:     { name: '貓屋',      price: 250,  emoji: '🏡', description: '貓咪的舒適居所',    boost: 1.1 },
-  pigPen:       { name: '豬圈',      price: 400,  emoji: '🏗️', description: '豬豬的泥土樂園',    boost: 1.2 },
-  pond:         { name: '池塘',      price: 600,  emoji: '🌊', description: '水鳥的天堂',        boost: 1.3 },
-  rabbitHutch:  { name: '兔籠',      price: 200,  emoji: '📦', description: '兔子的安全小屋',    boost: 1.2 },
-  greenhouse:   { name: '溫室',      price: 2000, emoji: '🏢', description: '不受天氣影響的種植空間', boost: 1.5 },
-  silo:         { name: '筒倉',      price: 800,  emoji: '🗼', description: '儲存更多作物',      boost: 1.0 },
-  windmill:     { name: '風車',      price: 1500, emoji: '🌪️', description: '產生額外收入',      boost: 1.0 },
-  sprinkler:    { name: '自動灑水器', price: 650,  emoji: '🚿', description: '每天自動澆灌作物，並降低澆水體力消耗', boost: 1.0 },
+  barn: {
+    name: '穀倉',
+    emoji: '🏚️',
+    description: '容納牛羊，提升產量',
+    levels: [
+      { cost: 1000, boost: 1.2, description: '基本穀倉，讓大型牲畜心情更穩定。' },
+      { cost: 1600, boost: 1.35, description: '擴建料槽與保溫設備，提升產量。' },
+      { cost: 2300, boost: 1.5, description: '自動飼料管理，讓牛羊保持高產。' },
+    ],
+    modules: [
+      {
+        id: 'autoGroomer',
+        name: '自動梳理機',
+        cost: 1800,
+        requirementLevel: 2,
+        description: '每天早晨為畜舍動物加值幸福度。',
+        effect: 'autoGroom',
+      },
+    ],
+  },
+  chickenCoop: {
+    name: '雞舍',
+    emoji: '🏠',
+    description: '專門養雞，提升產蛋率',
+    levels: [
+      { cost: 500, boost: 1.3, description: '簡易雞舍，改善產量。' },
+      { cost: 900, boost: 1.45, description: '加裝溫燈與自動餵食。' },
+    ],
+    modules: [],
+  },
+  dogHouse: {
+    name: '狗屋',
+    emoji: '🏘️',
+    description: '狗狗的溫馨小窩',
+    levels: [
+      { cost: 300, boost: 1.1, description: '遮風避雨的小屋。' },
+      { cost: 520, boost: 1.25, description: '加裝玩具與暖墊。' },
+    ],
+    modules: [],
+  },
+  catHouse: {
+    name: '貓屋',
+    emoji: '🏡',
+    description: '貓咪的舒適居所',
+    levels: [
+      { cost: 250, boost: 1.1, description: '柔軟的貓窩。' },
+      { cost: 480, boost: 1.22, description: '加裝貓跳台與暖燈。' },
+    ],
+    modules: [],
+  },
+  pigPen: {
+    name: '豬圈',
+    emoji: '🏗️',
+    description: '豬豬的泥土樂園',
+    levels: [
+      { cost: 400, boost: 1.2, description: '穩固圍欄與泥地。' },
+      { cost: 720, boost: 1.32, description: '自動清潔泥池，減少異味。' },
+    ],
+    modules: [],
+  },
+  pond: {
+    name: '池塘',
+    emoji: '🌊',
+    description: '水鳥的天堂',
+    levels: [
+      { cost: 600, boost: 1.3, description: '自然池塘，吸引水鳥。' },
+      { cost: 980, boost: 1.45, description: '擴建棲木與遮蔭。' },
+    ],
+    modules: [],
+  },
+  rabbitHutch: {
+    name: '兔籠',
+    emoji: '📦',
+    description: '兔子的安全小屋',
+    levels: [
+      { cost: 200, boost: 1.2, description: '堅固木籠保護兔子。' },
+      { cost: 420, boost: 1.32, description: '增設運動空間與食槽。' },
+    ],
+    modules: [],
+  },
+  greenhouse: {
+    name: '溫室',
+    emoji: '🏢',
+    description: '不受天氣影響的種植空間',
+    levels: [
+      { cost: 2000, description: '所有地塊獲得溫室保護，避免天氣損害。', greenhouseCoverage: true },
+      { cost: 3200, description: '氣候控制升級，減緩病蟲害與土壤衰退。', greenhouseCoverage: true, soilDecayReduction: 0.25 },
+    ],
+    modules: [
+      {
+        id: 'mistSystem',
+        name: '自動噴霧系統',
+        cost: 1400,
+        requirementLevel: 2,
+        description: '每天清晨自動澆灌溫室地塊，並帶來微量濕潤加成。',
+        effect: 'autoGreenhouseWater',
+      },
+    ],
+  },
+  silo: {
+    name: '筒倉',
+    emoji: '🗼',
+    description: '儲存更多作物',
+    levels: [
+      { cost: 800, storageBonus: 0.05, description: '擴充倉儲，增加出售加成。' },
+      { cost: 1300, storageBonus: 0.08, description: '裝設冷藏系統，讓作物保持新鮮。' },
+    ],
+    modules: [],
+  },
+  windmill: {
+    name: '風車',
+    emoji: '🌪️',
+    description: '產生額外收入',
+    levels: [
+      { cost: 1500, income: 50, description: '基礎風車，每日產出 50 金幣。' },
+      { cost: 2200, income: 90, description: '強化風葉，每日產出 90 金幣。' },
+      { cost: 3000, income: 140, description: '全自動風車系統，提供 140 金幣。' },
+    ],
+    modules: [
+      {
+        id: 'powerGrid',
+        name: '電力連結模組',
+        cost: 1800,
+        requirementLevel: 2,
+        description: '啟動加工廠，讓所有作物售價額外 +5%。',
+        effect: 'marketBoost',
+      },
+    ],
+  },
+  sprinkler: {
+    name: '自動灑水器',
+    emoji: '🚿',
+    description: '每天自動澆灌作物，並降低澆水體力消耗',
+    levels: [
+      { cost: 650, waterEnergyCost: 2, plantEnergyCost: 5, description: '減少澆水與種植的體力消耗。' },
+      { cost: 1400, waterEnergyCost: 0, plantEnergyCost: 3, autoMorningWater: true, description: '黎明自動灌溉並再降低體力需求。' },
+      { cost: 2200, waterEnergyCost: 0, plantEnergyCost: 1, autoMorningWater: true, description: '感測土壤狀態，自動調整澆灌效率。' },
+    ],
+    modules: [
+      {
+        id: 'fertInjector',
+        name: '施肥注入器',
+        cost: 1600,
+        requirementLevel: 2,
+        description: '澆水時自動施肥（消耗 1 份肥料）。',
+        effect: 'autoFertilize',
+      },
+    ],
+  },
 }
 
 const WEATHER_TYPES = ['sunny', 'rainy', 'cloudy', 'storm', 'snow']
 const SEASONS = ['spring','summer','autumn','winter']
+
+const STORY_QUESTS = [
+  {
+    id: 'welcome',
+    title: '新的開始',
+    description: '收成 3 次作物並建造第一棟設施，熟悉農場節奏。',
+    requirements: [
+      { type: 'harvest', target: 3, description: '收成 3 次作物' },
+      { type: 'buildingTotal', target: 1, description: '建造任一棟建築' },
+    ],
+    rewards: { money: 200, fertilizer: 3 },
+  },
+  {
+    id: 'automation',
+    title: '自動化藍圖',
+    description: '透過升級灑水器和模組化插件，打造半自動農場。',
+    requirements: [
+      { type: 'buildingLevel', building: 'sprinkler', level: 2, description: '灑水器升級至等級 2' },
+      { type: 'module', building: 'sprinkler', module: 'fertInjector', description: '安裝施肥注入器模組' },
+    ],
+    rewards: { money: 400, fertilizer: 5 },
+  },
+  {
+    id: 'windFactory',
+    title: '風之工坊',
+    description: '讓風車帶動加工廠，同時維持健康土壤與作物品質。',
+    requirements: [
+      { type: 'buildingLevel', building: 'windmill', level: 2, description: '風車升級至等級 2' },
+      { type: 'module', building: 'windmill', module: 'powerGrid', description: '安裝電力連結模組' },
+      { type: 'soilQuality', target: 75, description: '平均土壤肥力達到 75 以上' },
+    ],
+    rewards: { money: 600, fertilizer: 8 },
+  },
+]
+
+const DEFAULT_STORY_STATE = {
+  activeId: STORY_QUESTS[0].id,
+  completed: [],
+}
 
 /** ---------- 小工具 ---------- */
 const clamp = (v, min, max) => Math.max(min, Math.min(max, v))
@@ -74,7 +251,17 @@ const FarmGame = () => {
   // 農地
   const [farm, setFarm] = useState(
     Array(25).fill().map((_, i) => ({
-      id: i, crop: null, plantTime: null, watered: false, fertilized: false, greenhouse: false, ready: false
+      id: i,
+      crop: null,
+      plantTime: null,
+      watered: false,
+      fertilized: false,
+      greenhouse: false,
+      ready: false,
+      soilQuality: 70,
+      disease: 0,
+      restingDays: 0,
+      lastCrop: null,
     }))
   )
 
@@ -91,6 +278,128 @@ const FarmGame = () => {
   const [showBuildingShop, setShowBuildingShop] = useState(false)
   const [notifications, setNotifications] = useState([])
   const [speed, setSpeed] = useState(1) // 1x/2x/4x
+  const [showQuestModal, setShowQuestModal] = useState(false)
+  const [storyState, setStoryState] = useState(DEFAULT_STORY_STATE)
+  const [storyMetrics, setStoryMetrics] = useState({ harvests: 0 })
+
+  const normalizePlot = (plot, idx) => ({
+    id: plot?.id ?? idx,
+    crop: plot?.crop ?? null,
+    plantTime: plot?.plantTime ?? null,
+    watered: Boolean(plot?.watered),
+    fertilized: Boolean(plot?.fertilized),
+    greenhouse: Boolean(plot?.greenhouse),
+    ready: Boolean(plot?.ready),
+    soilQuality: clamp(typeof plot?.soilQuality === 'number' ? plot.soilQuality : 70, 0, 100),
+    disease: clamp(typeof plot?.disease === 'number' ? plot.disease : 0, 0, 100),
+    restingDays: Math.max(0, plot?.restingDays ?? 0),
+    lastCrop: plot?.lastCrop ?? null,
+  })
+
+  const normalizeBuildings = (raw = {}) => {
+    const formatted = {}
+    Object.entries(raw || {}).forEach(([key, value]) => {
+      const def = BUILDINGS[key]
+      if (!def) return
+
+      if (typeof value === 'boolean') {
+        if (value) {
+          formatted[key] = { level: 1, modules: [] }
+        }
+        return
+      }
+
+      const level = clamp(typeof value?.level === 'number' ? value.level : (value ? 1 : 0), 0, def.levels.length)
+      const modules = Array.isArray(value?.modules)
+        ? value.modules.filter(id => def.modules.some(m => m.id === id))
+        : []
+
+      if (level > 0 || modules.length > 0) {
+        formatted[key] = { level, modules }
+      }
+    })
+    return formatted
+  }
+
+  const getBuildingLevel = useCallback((type) => buildings[type]?.level || 0, [buildings])
+  const hasModule = useCallback((type, moduleId) => !!buildings[type]?.modules?.includes(moduleId), [buildings])
+
+  const getWaterEnergyCost = useCallback(() => {
+    const level = getBuildingLevel('sprinkler')
+    if (!level) return 5
+    return BUILDINGS.sprinkler.levels[level - 1]?.waterEnergyCost ?? 5
+  }, [getBuildingLevel])
+
+  const getPlantEnergyCost = useCallback(() => {
+    const level = getBuildingLevel('sprinkler')
+    if (!level) return 10
+    return BUILDINGS.sprinkler.levels[level - 1]?.plantEnergyCost ?? 10
+  }, [getBuildingLevel])
+
+  const getSiloMultiplier = useCallback(() => {
+    const level = getBuildingLevel('silo')
+    if (!level) return 1
+    return 1 + (BUILDINGS.silo.levels[level - 1]?.storageBonus || 0)
+  }, [getBuildingLevel])
+
+  const averageSoilQuality = useMemo(() => {
+    if (!farm.length) return 0
+    const total = farm.reduce((acc, plot) => acc + (plot.soilQuality || 0), 0)
+    return Math.round(total / farm.length)
+  }, [farm])
+
+  const isRequirementMet = useCallback((req) => {
+    switch (req.type) {
+      case 'harvest':
+        return (storyMetrics.harvests || 0) >= (req.target || 0)
+      case 'buildingTotal':
+        return Object.values(buildings).filter(b => (b?.level || 0) > 0).length >= (req.target || 0)
+      case 'buildingLevel':
+        return getBuildingLevel(req.building) >= (req.level || 0)
+      case 'module':
+        return hasModule(req.building, req.module)
+      case 'soilQuality':
+        return averageSoilQuality >= (req.target || 0)
+      default:
+        return false
+    }
+  }, [averageSoilQuality, buildings, getBuildingLevel, hasModule, storyMetrics])
+
+  const evaluateStoryProgress = useCallback(() => {
+    setStoryState(prev => {
+      if (!prev.activeId) return prev
+      const questIndex = STORY_QUESTS.findIndex(q => q.id === prev.activeId)
+      const quest = STORY_QUESTS[questIndex]
+      if (!quest) return prev
+      if (prev.completed.includes(quest.id)) return prev
+
+      const satisfied = quest.requirements.every(isRequirementMet)
+
+      if (!satisfied) return prev
+
+      if (quest.rewards?.money) setMoney(m => m + quest.rewards.money)
+      if (quest.rewards?.fertilizer) setFertilizer(f => f + quest.rewards.fertilizer)
+      addNotification(`劇情任務完成：${quest.title}！`)
+
+      const nextQuest = STORY_QUESTS[questIndex + 1]
+      if (nextQuest) {
+        addNotification(`新任務解鎖：${nextQuest.title}`)
+      }
+      return {
+        activeId: nextQuest?.id || null,
+        completed: [...prev.completed, quest.id],
+      }
+    })
+  }, [addNotification, isRequirementMet, setFertilizer, setMoney])
+
+  useEffect(() => {
+    evaluateStoryProgress()
+  }, [evaluateStoryProgress])
+
+  const activeQuest = useMemo(
+    () => STORY_QUESTS.find(q => q.id === storyState.activeId),
+    [storyState.activeId]
+  )
 
   /** -------- 通知 ------- */
   const addNotification = useCallback((message) => {
@@ -119,11 +428,32 @@ const FarmGame = () => {
       setInventory(s.inventory ?? inventory)
       setSeedBag(s.seedBag ?? seedBag)
       setFertilizer(s.fertilizer ?? 0)
-      setFarm(s.farm ?? farm)
-      setAnimals(s.animals ?? [])
-      setBuildings(s.buildings ?? {})
+
+      const loadedFarm = Array.isArray(s.farm) ? s.farm : farm
+      const normalizedFarm = loadedFarm.map((p, idx) => normalizePlot(p, idx))
+      const normalizedBuildings = normalizeBuildings(s.buildings ?? {})
+      const greenhouseLevel = normalizedBuildings.greenhouse?.level || 0
+      const farmWithGreenhouse = greenhouseLevel
+        ? normalizedFarm.map(plot => ({ ...plot, greenhouse: true }))
+        : normalizedFarm
+
+      setFarm(farmWithGreenhouse)
+      setAnimals((s.animals ?? []).map(animal => ({
+        ...animal,
+        happiness: clamp(typeof animal?.happiness === 'number' ? animal.happiness : 50, 0, 100),
+      })))
+      setBuildings(normalizedBuildings)
       setMarket(s.market ?? market)
       setSpeed(s.speed ?? 1)
+      setStoryState(s.storyState ? {
+        activeId: s.storyState.activeId && STORY_QUESTS.some(q => q.id === s.storyState.activeId)
+          ? s.storyState.activeId
+          : DEFAULT_STORY_STATE.activeId,
+        completed: Array.isArray(s.storyState.completed) ? s.storyState.completed : [],
+      } : DEFAULT_STORY_STATE)
+      setStoryMetrics({
+        harvests: s.storyMetrics?.harvests ?? 0,
+      })
       addNotification('讀取存檔完成')
     } catch(e) {
       console.error(e)
@@ -136,12 +466,12 @@ const FarmGame = () => {
     const id = setTimeout(() => {
       const s = {
         money, energy, level, experience, time, day, season, weather, weatherDuration,
-        inventory, seedBag, fertilizer, farm, animals, buildings, market, speed
+        inventory, seedBag, fertilizer, farm, animals, buildings, market, speed, storyState, storyMetrics
       }
       localStorage.setItem('farm-save-v2', JSON.stringify(s))
     }, 400)
     return () => clearTimeout(id)
-  }, [money, energy, level, experience, time, day, season, weather, weatherDuration, inventory, seedBag, fertilizer, farm, animals, buildings, market, speed])
+  }, [money, energy, level, experience, time, day, season, weather, weatherDuration, inventory, seedBag, fertilizer, farm, animals, buildings, market, speed, storyState, storyMetrics])
 
   /** -------- 天氣系統 -------- */
   useEffect(() => {
@@ -212,22 +542,64 @@ const FarmGame = () => {
           // 動物每日收入 & 情緒變化
           setAnimals(prev => prev.map(animal => {
             const shelter = ANIMALS[animal.type].shelter
-            const hasB = buildings[shelter]
-            const boost = hasB ? BUILDINGS[shelter].boost : 1
+            const shelterLevel = getBuildingLevel(shelter)
+            const levelConfig = shelterLevel ? BUILDINGS[shelter].levels[shelterLevel - 1] : null
+            const boost = levelConfig?.boost ?? 1
             const income = int(ANIMALS[animal.type].income * boost * (animal.happiness / 100))
             if (animal.happiness > 20 && income > 0) {
               setMoney(m => m + income)
               addNotification(`${animal.name} 產生了 $${income}！`)
             }
-            return { ...animal, happiness: Math.max(0, animal.happiness - 12) }
+            let nextHappiness = Math.max(0, animal.happiness - 12)
+            if (shelter === 'barn' && hasModule('barn', 'autoGroomer') && shelterLevel) {
+              nextHappiness = clamp(nextHappiness + 8, 0, 100)
+            }
+            return { ...animal, happiness: nextHappiness }
           }))
 
-          // 風車收入
-          if (buildings.windmill) {
-            const windmillIncome = 50
-            setMoney(m => m + windmillIncome)
-            addNotification(`🌪️ 風車產生了 $${windmillIncome}！`)
+          // 每日風車收入
+          const windmillLevel = getBuildingLevel('windmill')
+          if (windmillLevel) {
+            const income = BUILDINGS.windmill.levels[windmillLevel - 1]?.income || 0
+            if (income > 0) {
+              setMoney(m => m + income)
+              addNotification(`🌪️ 風車產生了 $${income}！`)
+            }
           }
+
+          // 自動澆灌與土壤調整
+          const sprinklerLevel = getBuildingLevel('sprinkler')
+          const sprinklerConfig = sprinklerLevel ? BUILDINGS.sprinkler.levels[sprinklerLevel - 1] : null
+          const greenhouseLevelNow = getBuildingLevel('greenhouse')
+          const greenhouseConfig = greenhouseLevelNow ? BUILDINGS.greenhouse.levels[greenhouseLevelNow - 1] : null
+
+          setFarm(prev => prev.map(plot => {
+            const resting = plot.crop ? 0 : plot.restingDays + 1
+            const repeated = plot.lastCrop && plot.lastCrop === plot.crop && plot.crop
+            const baseDecay = plot.crop ? 4 + (repeated ? 4 : 0) : -3
+            const adjustedDecay = baseDecay * (1 - (greenhouseConfig?.soilDecayReduction || 0))
+            const soilQuality = clamp(plot.soilQuality - adjustedDecay, 0, 100)
+            const diseaseDelta = plot.crop
+              ? (repeated ? 10 : 4)
+              : -8
+            const disease = clamp(plot.disease + diseaseDelta, 0, 100)
+
+            let watered = plot.watered
+            if (plot.crop && sprinklerConfig?.autoMorningWater) {
+              watered = true
+            }
+            if (plot.crop && plot.greenhouse && hasModule('greenhouse', 'mistSystem')) {
+              watered = true
+            }
+
+            return {
+              ...plot,
+              watered,
+              soilQuality,
+              disease,
+              restingDays: resting,
+            }
+          }))
 
           return 6 // 早上 6 點
         }
@@ -236,7 +608,7 @@ const FarmGame = () => {
     }, msPerHour)
 
     return () => clearInterval(timer)
-  }, [addNotification, buildings, season, speed])
+  }, [addNotification, buildings, getBuildingLevel, hasModule, season, speed])
 
   /** -------- 作物成長（每 5s 檢查一次，受 weather / 溫室 / 施肥） -------- */
   useEffect(() => {
@@ -260,6 +632,14 @@ const FarmGame = () => {
           // 施肥（加速）
           if (plot.fertilized) mult *= 1.25
 
+          const soilBonus = clamp((plot.soilQuality - 70) / 150, -0.4, 0.6)
+          mult *= 1 + soilBonus
+          const diseasePenalty = clamp(1 - (plot.disease || 0) / 160, 0.4, 1)
+          mult *= diseasePenalty
+          if (plot.greenhouse && hasModule('greenhouse', 'mistSystem')) {
+            mult *= 1.05
+          }
+
           const needMs = (crop.growTime * 60000) / mult
           if (!plot.ready && now - plot.plantTime >= needMs) {
             addNotification(`${crop.emoji} ${crop.name} 成熟了！`)
@@ -271,7 +651,7 @@ const FarmGame = () => {
     }, 5000 / speed)
 
     return () => clearInterval(growTimer)
-  }, [addNotification, speed, weather])
+  }, [addNotification, hasModule, speed, weather])
 
   /** -------- 升級 -------- */
   useEffect(() => {
@@ -310,12 +690,24 @@ const FarmGame = () => {
   const plantSeed = (plotId) => {
     if (!selectedSeed) return
     if (seedBag[selectedSeed] <= 0) return addNotification('該種子庫存不足！')
-    const energyCost = buildings.sprinkler ? 5 : 10
+    const plot = farm.find(p => p.id === plotId)
+    if (!plot || plot.crop) return
+    const energyCost = getPlantEnergyCost()
     if (energy < energyCost) return addNotification('體力不足！')
+
+    if (plot.lastCrop === selectedSeed && plot.restingDays < 2) {
+      addNotification('這塊土地剛種過相同作物，肥力下降較快！')
+    }
+    if (plot.soilQuality < 40) {
+      addNotification('土地肥力偏低，作物可能生長較慢。')
+    }
+    if (plot.disease > 60) {
+      addNotification('此地塊病蟲害嚴重，建議先休耕或輪作。')
+    }
 
     setFarm(prev => prev.map(p =>
       p.id === plotId && !p.crop
-        ? { ...p, crop: selectedSeed, plantTime: Date.now(), watered: false, fertilized: false, ready:false }
+        ? { ...p, crop: selectedSeed, plantTime: Date.now(), watered: false, fertilized: false, ready:false, restingDays: 0 }
         : p
     ))
     setSeedBag(b => ({ ...b, [selectedSeed]: b[selectedSeed]-1 }))
@@ -329,7 +721,12 @@ const FarmGame = () => {
     if (energy < 5) return addNotification('體力不足！')
     setFarm(prev => prev.map(p =>
       p.id === plotId && p.crop && !p.fertilized
-        ? { ...p, fertilized: true }
+        ? {
+            ...p,
+            fertilized: true,
+            soilQuality: clamp(p.soilQuality + 6, 0, 100),
+            disease: clamp(p.disease - 4, 0, 100),
+          }
         : p
     ))
     setFertilizer(f => f - 1)
@@ -346,9 +743,18 @@ const FarmGame = () => {
     let bonus = 1
     if (plot.watered) bonus *= 1.2
     if (plot.fertilized) bonus *= 1.3
-    if (plot.greenhouse) bonus *= 1.15
-    if (buildings.silo) bonus *= 1.05
+    const greenhouseLevel = getBuildingLevel('greenhouse')
+    if (plot.greenhouse) {
+      const greenhouseBonus = greenhouseLevel ? 1.1 + greenhouseLevel * 0.05 : 1.15
+      bonus *= greenhouseBonus
+    }
+    bonus *= getSiloMultiplier()
     if (!plot.greenhouse) bonus *= (data.weatherBonus[weather] || 1)
+    if (hasModule('windmill', 'powerGrid')) bonus *= 1.05
+    const soilYield = clamp(1 + (plot.soilQuality - 70) / 180, 0.7, 1.45)
+    bonus *= soilYield
+    const diseasePenalty = clamp(1 - (plot.disease || 0) / 140, 0.5, 1)
+    bonus *= diseasePenalty
     bonus *= (market[crop] || 1) // 市場價格
 
     const sellPrice = int(data.sellPrice * bonus)
@@ -356,18 +762,51 @@ const FarmGame = () => {
     setMoney(m => m + sellPrice)
     setInventory(inv => ({ ...inv, [crop]: inv[crop] + 1 }))
     setExperience(e => e + 10)
-    setFarm(prev => prev.map(p => p.id === plotId ? { ...p, crop:null, plantTime:null, watered:false, fertilized:false, ready:false } : p))
+    const greenhouseConfig = greenhouseLevel
+      ? BUILDINGS.greenhouse.levels[greenhouseLevel - 1]
+      : null
+    setFarm(prev => prev.map(p => {
+      if (p.id !== plotId) return p
+      const rotationPenalty = p.lastCrop === crop ? 8 : 5
+      const relief = p.fertilized ? 4 : 0
+      const soilDecay = (rotationPenalty - relief) * (1 - (greenhouseConfig?.soilDecayReduction || 0))
+      const newSoil = clamp(p.soilQuality - soilDecay, 0, 100)
+      const disease = clamp(p.disease + (p.lastCrop === crop ? 14 : 6) - (p.fertilized ? 4 : 0), 0, 100)
+      return {
+        ...p,
+        crop: null,
+        plantTime: null,
+        watered: false,
+        fertilized: false,
+        ready: false,
+        soilQuality: newSoil,
+        disease,
+        lastCrop: crop,
+        restingDays: 0,
+      }
+    }))
+    setStoryMetrics(prev => ({ ...prev, harvests: (prev.harvests || 0) + 1 }))
     addNotification(`收成 ${data.emoji}，收入 $${sellPrice}`)
   }
 
   const waterPlot = (plotId) => {
-    const energyCost = buildings.sprinkler ? 1 : 5
+    const energyCost = getWaterEnergyCost()
     if (energy < energyCost) return addNotification('體力不足！')
+    let autoFertilized = false
+    let canAutoFertilize = hasModule('sprinkler', 'fertInjector') && fertilizer > 0
     setFarm(prev => prev.map(p =>
       p.id === plotId && p.crop && !p.watered
-        ? { ...p, watered: true }
+        ? {
+            ...p,
+            watered: true,
+            fertilized: p.fertilized || (canAutoFertilize ? (autoFertilized = true) : false),
+          }
         : p
     ))
+    if (autoFertilized) {
+      setFertilizer(f => Math.max(0, f - 1))
+      addNotification('灑水器自動施肥完成！')
+    }
     setEnergy(e => clamp(e - energyCost, 0, 100))
     addNotification('澆水完成！')
   }
@@ -385,18 +824,64 @@ const FarmGame = () => {
     addNotification(`購買了 ${ANIMALS[animalType].emoji} ${ANIMALS[animalType].name}！`)
   }
 
-  const buyBuilding = (buildingType) => {
-    if (buildings[buildingType]) return addNotification('已擁有此建築！')
-    const price = BUILDINGS[buildingType].price
-    if (money < price) return addNotification('金錢不足！')
-    setMoney(m => m - price)
-    setBuildings(b => ({ ...b, [buildingType]: true }))
+  const upgradeBuilding = (buildingType) => {
+    const info = BUILDINGS[buildingType]
+    if (!info) return
+    const currentLevel = getBuildingLevel(buildingType)
+    if (currentLevel >= info.levels.length) return addNotification('已達最高等級！')
+    const nextLevel = info.levels[currentLevel]
+    if (!nextLevel) return
+    if (money < nextLevel.cost) return addNotification('金錢不足！')
+
+    setMoney(m => m - nextLevel.cost)
+    setBuildings(prev => {
+      const prevData = prev[buildingType] || { level: 0, modules: [] }
+      const updated = {
+        ...prev,
+        [buildingType]: {
+          level: currentLevel + 1,
+          modules: prevData.modules || [],
+        },
+      }
+      return updated
+    })
 
     if (buildingType === 'greenhouse') {
-      setFarm(prev => prev.map(p => (p.greenhouse ? p : { ...p, greenhouse: true })))
+      setFarm(prev => prev.map(p => ({ ...p, greenhouse: true })))
     }
+
     setShowBuildingShop(false)
-    addNotification(`建造了 ${BUILDINGS[buildingType].emoji} ${BUILDINGS[buildingType].name}！`)
+    addNotification(`${currentLevel ? '升級' : '建造'} ${info.emoji} ${info.name}（Lv.${currentLevel + 1}）！`)
+  }
+
+  const purchaseModule = (buildingType, moduleId) => {
+    const info = BUILDINGS[buildingType]
+    if (!info) return
+    const moduleInfo = info.modules.find(m => m.id === moduleId)
+    if (!moduleInfo) return
+    const level = getBuildingLevel(buildingType)
+    if (!level) return addNotification('請先建造並升級此建築！')
+    if (level < (moduleInfo.requirementLevel || 1)) {
+      return addNotification('需要更高等級才能安裝此模組！')
+    }
+    if (hasModule(buildingType, moduleId)) {
+      return addNotification('已安裝此模組！')
+    }
+    if (money < moduleInfo.cost) return addNotification('金錢不足！')
+
+    setMoney(m => m - moduleInfo.cost)
+    setBuildings(prev => {
+      const prevData = prev[buildingType] || { level: level, modules: [] }
+      const modules = [...new Set([...(prevData.modules || []), moduleId])]
+      return {
+        ...prev,
+        [buildingType]: {
+          level: prevData.level || level,
+          modules,
+        },
+      }
+    })
+    addNotification(`安裝了 ${moduleInfo.name}！`)
   }
 
   const feedAnimal = (animalId) => {
@@ -427,7 +912,17 @@ const FarmGame = () => {
     setFarm(prev => [
       ...prev,
       ...Array(5).fill().map((_, i) => ({
-        id: prev.length + i, crop:null, plantTime:null, watered:false, fertilized:false, greenhouse:false, ready:false
+        id: prev.length + i,
+        crop:null,
+        plantTime:null,
+        watered:false,
+        fertilized:false,
+        greenhouse: getBuildingLevel('greenhouse') > 0,
+        ready:false,
+        soilQuality: 70,
+        disease: 0,
+        restingDays: 0,
+        lastCrop: null,
       }))
     ])
     addNotification('擴建農地 +5 格！')
@@ -499,6 +994,13 @@ const FarmGame = () => {
               </button>
             ))}
           </div>
+          <button
+            onClick={()=>setShowQuestModal(true)}
+            className="ml-3 flex items-center gap-1 bg-amber-500 hover:bg-amber-600 text-black px-3 py-1 rounded text-sm"
+          >
+            <ScrollText className="w-4 h-4"/>
+            <span>{activeQuest ? activeQuest.title : '劇情任務'}</span>
+          </button>
         </div>
 
         <div className="flex items-center gap-4">
@@ -506,6 +1008,10 @@ const FarmGame = () => {
           <div className="flex items-center gap-1"><span>{getWeatherIcon()}</span><span className="text-sm">{getWeatherName(weather)}</span></div>
           <span className="capitalize text-sm">{getSeasonName(season)}</span>
           <span className="text-sm">第{day}天</span>
+          <div className="flex items-center gap-1 text-sm text-green-100">
+            <Seedling className="w-4 h-4 text-green-200"/>
+            <span>平均肥力 {averageSoilQuality}</span>
+          </div>
         </div>
       </div>
 
@@ -539,7 +1045,7 @@ const FarmGame = () => {
                     plot.crop ? (plot.ready ? 'bg-green-200 border-green-400 animate-pulse'
                                             : 'bg-yellow-100 border-yellow-400')
                               : 'bg-gray-100 border-gray-300 hover:bg-green-50'
-                  }`}
+                  } ${plot.soilQuality < 35 ? 'border-red-400' : plot.soilQuality > 85 ? 'border-emerald-500' : ''}`}
                   onClick={()=>{
                     if (plot.crop && plot.ready) harvestCrop(plot.id)
                     else if (!plot.crop && selectedSeed) plantSeed(plot.id)
@@ -551,7 +1057,17 @@ const FarmGame = () => {
                   }}
                 >
                   <div className="h-full flex flex-col items-center justify-center text-2xl">
-                    {plot.greenhouse && (<div className="absolute top-0 right-0 text-xs">🏢</div>)}
+                    <div className="absolute top-1 left-1 text-[10px] font-semibold bg-white/70 text-amber-700 px-1 rounded">
+                      肥 {Math.round(plot.soilQuality)}
+                    </div>
+                    <div className="absolute top-1 right-1 flex flex-col items-end gap-1 text-[10px]">
+                      {plot.greenhouse && <span className="bg-green-200 text-green-700 px-1 rounded">🏢</span>}
+                      {plot.disease > 5 && (
+                        <span className={`px-1 rounded ${plot.disease > 70 ? 'bg-red-500 text-white' : 'bg-red-100 text-red-700'}`}>
+                          病 {Math.round(plot.disease)}
+                        </span>
+                      )}
+                    </div>
                     {plot.crop ? (
                       <>
                         <div className={`transform transition-transform duration-500 ${plot.ready ? 'scale-125 animate-bounce':'scale-100'}`}>
@@ -564,6 +1080,11 @@ const FarmGame = () => {
                       </>
                     ) : (
                       selectedSeed && <div className="text-gray-400">+</div>
+                    )}
+                    {!plot.crop && plot.restingDays > 0 && (
+                      <div className="absolute bottom-1 left-1 text-[10px] text-gray-600 bg-white/70 px-1 rounded">
+                        休耕 {plot.restingDays}天
+                      </div>
                     )}
                   </div>
                 </div>
@@ -591,16 +1112,23 @@ const FarmGame = () => {
                 <h3 className="text-lg font-bold mb-3">我的動物們</h3>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                   {animals.map(a=>{
-                    const hasB = buildings[ANIMALS[a.type].shelter]
-                    const daily = int(ANIMALS[a.type].income * (hasB?BUILDINGS[ANIMALS[a.type].shelter].boost:1))
+                    const shelter = ANIMALS[a.type].shelter
+                    const shelterLevel = getBuildingLevel(shelter)
+                    const levelInfo = shelterLevel ? BUILDINGS[shelter].levels[shelterLevel - 1] : null
+                    const hasShelter = shelterLevel > 0
+                    const daily = int(ANIMALS[a.type].income * (levelInfo?.boost ?? 1))
                     return (
                       <div key={a.id}
                         className={`rounded-lg p-3 cursor-pointer transition-colors relative ${
-                          hasB?'bg-green-100 hover:bg-green-200':'bg-blue-100 hover:bg-blue-200'
+                          hasShelter?'bg-green-100 hover:bg-green-200':'bg-blue-100 hover:bg-blue-200'
                         }`}
                         onClick={()=>feedAnimal(a.id)}
                       >
-                        {hasB && <div className="absolute top-1 right-1 text-xs">{BUILDINGS[ANIMALS[a.type].shelter].emoji}</div>}
+                        {hasShelter && (
+                          <div className="absolute top-1 right-1 text-xs">
+                            {BUILDINGS[shelter].emoji} Lv.{shelterLevel}
+                          </div>
+                        )}
                         <div className="text-center">
                           <div className="text-3xl mb-2 animate-bounce">{ANIMALS[a.type].emoji}</div>
                           <div className="text-sm font-semibold">{a.name}</div>
@@ -760,20 +1288,129 @@ const FarmGame = () => {
       {/* === 建築商店 === */}
       {showBuildingShop && (
         <Modal title="建築商店" onClose={()=>setShowBuildingShop(false)}>
-          <div className="grid grid-cols-2 gap-4 max-h-[60vh] overflow-y-auto pr-2">
-            {Object.entries(BUILDINGS).map(([key, b]) => (
-              <div key={key}
-                   className={`border rounded-lg p-4 cursor-pointer ${buildings[key]?'bg-green-100 border-green-400':'hover:bg-gray-50'}`}
-                   onClick={()=>buyBuilding(key)}>
-                <div className="text-center">
-                  <div className="text-3xl mb-2">{b.emoji}</div>
-                  <div className="font-semibold">{b.name}</div>
-                  <div className="font-bold text-green-600">{buildings[key] ? '已擁有' : `$${b.price}`}</div>
-                  <div className="text-xs text-gray-600 mt-2">{b.description}</div>
-                  {b.boost !== 1 && <div className="text-xs text-blue-600">效果加成: {Math.round(b.boost*100)}%</div>}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-h-[60vh] overflow-y-auto pr-2">
+            {Object.entries(BUILDINGS).map(([key, b]) => {
+              const owned = buildings[key]
+              const currentLevel = owned?.level || 0
+              const currentConfig = currentLevel ? b.levels[currentLevel - 1] : null
+              const nextConfig = b.levels[currentLevel] || null
+              const modulesOwned = owned?.modules || []
+              return (
+                <div key={key}
+                     className={`border rounded-lg p-4 transition-colors ${currentLevel ? 'bg-green-50 border-green-400' : 'hover:bg-gray-50'}`}>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="text-2xl">{b.emoji}</div>
+                      <div className="font-semibold mt-1">{b.name}</div>
+                    </div>
+                    <div className="text-right text-xs">
+                      <div>等級 {currentLevel}/{b.levels.length}</div>
+                      {modulesOwned.length > 0 && (
+                        <div className="text-green-600">模組: {modulesOwned.length}</div>
+                      )}
+                    </div>
+                  </div>
+                  <div className="text-xs text-gray-600 mt-2">{currentConfig?.description || b.description}</div>
+                  {nextConfig && (
+                    <div className="text-xs text-purple-700 mt-1">下一階段：{nextConfig.description}</div>
+                  )}
+                  <button
+                    className={`mt-3 w-full px-3 py-2 rounded text-sm font-semibold ${nextConfig ? 'bg-green-600 text-white hover:bg-green-700' : 'bg-gray-300 text-gray-600 cursor-not-allowed'}`}
+                    onClick={()=> nextConfig && upgradeBuilding(key)}
+                    disabled={!nextConfig}
+                  >
+                    {nextConfig ? `${currentLevel ? '升級' : '建造'} - $${nextConfig.cost}` : '已達最高等級'}
+                  </button>
+                  {b.modules.length > 0 && (
+                    <div className="mt-3 pt-3 border-t text-left space-y-2">
+                      <div className="text-xs font-semibold text-gray-700">模組化插件</div>
+                      {b.modules.map(mod => {
+                        const installed = modulesOwned.includes(mod.id)
+                        const requirementMet = currentLevel >= (mod.requirementLevel || 1)
+                        return (
+                          <div key={mod.id} className="bg-white/70 rounded p-2 text-xs flex flex-col gap-1">
+                            <div className="flex items-center justify-between">
+                              <span className="font-semibold">{mod.name}</span>
+                              <button
+                                className={`px-2 py-1 rounded ${installed ? 'bg-green-200 text-green-700 cursor-not-allowed' : requirementMet ? 'bg-blue-500 text-white hover:bg-blue-600' : 'bg-gray-200 text-gray-500 cursor-not-allowed'}`}
+                                onClick={()=> !installed && requirementMet && purchaseModule(key, mod.id)}
+                                disabled={installed || !requirementMet}
+                              >
+                                {installed ? '已安裝' : `$${mod.cost}`}
+                              </button>
+                            </div>
+                            <div className="text-[11px] text-gray-600">{mod.description}</div>
+                            {!requirementMet && !installed && (
+                              <div className="text-[11px] text-red-500">需要等級 {mod.requirementLevel}</div>
+                            )}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
                 </div>
+              )
+            })}
+          </div>
+        </Modal>
+      )}
+
+      {showQuestModal && (
+        <Modal title="農場故事任務" onClose={()=>setShowQuestModal(false)}>
+          <div className="space-y-4">
+            {activeQuest ? (
+              <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+                <h3 className="text-lg font-semibold text-amber-700 flex items-center gap-2">
+                  <ScrollText className="w-5 h-5"/> {activeQuest.title}
+                </h3>
+                <p className="text-sm text-amber-900 mt-1">{activeQuest.description}</p>
+                <div className="mt-3 space-y-2">
+                  {activeQuest.requirements.map((req, idx) => {
+                    const met = isRequirementMet(req)
+                    let progress = ''
+                    if (req.type === 'harvest') progress = `${Math.min(storyMetrics.harvests, req.target)}/${req.target}`
+                    if (req.type === 'buildingTotal') {
+                      const count = Object.values(buildings).filter(b => (b?.level || 0) > 0).length
+                      progress = `${Math.min(count, req.target)}/${req.target}`
+                    }
+                    if (req.type === 'buildingLevel') progress = `Lv.${getBuildingLevel(req.building)}/${req.level}`
+                    if (req.type === 'module') progress = hasModule(req.building, req.module) ? '已安裝' : '未安裝'
+                    if (req.type === 'soilQuality') progress = `${averageSoilQuality}/${req.target}`
+                    return (
+                      <div key={idx} className={`flex items-center justify-between rounded px-3 py-2 text-sm ${met ? 'bg-green-100 text-green-700' : 'bg-white'}`}>
+                        <span>{req.description}</span>
+                        <span className="text-xs text-gray-600">{progress}</span>
+                      </div>
+                    )
+                  })}
+                </div>
+                {activeQuest.rewards && (
+                  <div className="mt-3 text-xs text-amber-800">
+                    獎勵：
+                    {activeQuest.rewards.money ? `金錢 +${activeQuest.rewards.money} ` : ''}
+                    {activeQuest.rewards.fertilizer ? `肥料 +${activeQuest.rewards.fertilizer}` : ''}
+                  </div>
+                )}
               </div>
-            ))}
+            ) : (
+              <div className="bg-green-50 border border-green-200 rounded-lg p-4 text-green-700">
+                所有故事任務皆已完成！保持農場的蓬勃發展吧。
+              </div>
+            )}
+
+            <div>
+              <h4 className="text-sm font-semibold text-gray-600 mb-2">已完成任務</h4>
+              {storyState.completed.length > 0 ? (
+                <ul className="space-y-1 text-sm text-gray-700">
+                  {storyState.completed.map(id => {
+                    const quest = STORY_QUESTS.find(q => q.id === id)
+                    return <li key={id}>✅ {quest?.title || id}</li>
+                  })}
+                </ul>
+              ) : (
+                <p className="text-sm text-gray-500">尚未完成任何劇情任務。</p>
+              )}
+            </div>
           </div>
         </Modal>
       )}
