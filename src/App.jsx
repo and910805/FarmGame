@@ -1675,7 +1675,7 @@ const FarmGame = () => {
                     lastCareTime: null,
                     trait: pickAnimalTraitKey(type) || 'steadfast',
                     age: 0,
-                    butcherableOnDay: newDay + ANIMAL_MIN_BUTCHER_AGE_DAYS,
+                    butcherableOnDay: upcomingDay + ANIMAL_MIN_BUTCHER_AGE_DAYS,
                   });
                   availableSlots -= 1;
                 }
