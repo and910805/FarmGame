@@ -508,6 +508,7 @@ const FarmGame = () => {
   const [inventorySortMode, setInventorySortMode] = useState('value');
 
   const stateRef = useRef({});
+  const newbornAnimalsRef = useRef([]);
 
   const notificationCenter = useMemo(() => new NotificationCenter(setNotifications), []);
   const addNotification = useCallback((message, options) => {
@@ -1374,9 +1375,11 @@ const FarmGame = () => {
 
           // 動物每日狀態與收入結算
           const producedGoods = {};
-          let newbornAnimalsCaptured = [];
+          newbornAnimalsRef.current = [];
           setAnimals(prevAnimals => {
+            const localNewborns = [];
             if (!Array.isArray(prevAnimals) || prevAnimals.length === 0) {
+              newbornAnimalsRef.current = localNewborns;
               return prevAnimals;
             }
 
@@ -1388,7 +1391,6 @@ const FarmGame = () => {
             const sickAnimals = [];
             const outbreakVictims = [];
             const overcrowdAlerts = [];
-            const newbornAnimals = [];
             const careReminders = [];
             const careWarnings = [];
             const dirtyPens = [];
@@ -1656,8 +1658,8 @@ const FarmGame = () => {
                   typeCounts[type] = (typeCounts[type] || 0) + 1;
                   const babyIndex = typeCounts[type];
                   const babyName = `${data.name}寶寶${babyIndex}`;
-                  newbornAnimals.push({
-                    id: Date.now() + newbornAnimals.length + Math.floor(Math.random() * 1000),
+                  localNewborns.push({
+                    id: Date.now() + localNewborns.length + Math.floor(Math.random() * 1000),
                     type,
                     happiness: data.happiness,
                     hunger: 68,
@@ -1739,17 +1741,18 @@ const FarmGame = () => {
               addNotification(`🧹 ${regularDirty.join('、')} 的欄舍需要整理，保持清潔讓牠們更安心。`, { type: 'warning' });
             }
 
-            if (newbornAnimals.length > 0) {
-              const names = newbornAnimals.map(animal => animal.name).join('、');
+            if (localNewborns.length > 0) {
+              const names = localNewborns.map(animal => animal.name).join('、');
               addNotification(`🐣 ${names} 出生了，農場又更熱鬧了！`, { type: 'success' });
             }
 
-            const nextAnimals = [...processedAnimals, ...newbornAnimals];
+            const nextAnimals = [...processedAnimals, ...localNewborns];
             stateRef.current.animals = nextAnimals;
-            newbornAnimalsCaptured = newbornAnimals;
+            newbornAnimalsRef.current = localNewborns;
             return nextAnimals;
           });
 
+          const newbornAnimalsCaptured = newbornAnimalsRef.current;
           if (newbornAnimalsCaptured.length > 0) {
             const firstNewborn = newbornAnimalsCaptured[0];
             promptAnimalNaming(firstNewborn.id, firstNewborn.name || '');
