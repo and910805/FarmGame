@@ -1,5 +1,3 @@
-import { FARM_SUPPLIES } from '../data/GameCatalog';
-
 export const BASE_FARM_PLOTS = 25;
 export const FARM_EXPANSION_BATCH = 1;
 export const MAX_FARM_PLOTS = 45;
@@ -89,10 +87,4 @@ export const ANIMAL_CARE_ACTIONS = {
     bondBoost: 8,
     cleanlinessBoost: 28,
   },
-};
-
-export const SUPPLY_PURCHASE_LIMITS = {
-  fertilizer: FARM_SUPPLIES.fertilizer?.maxPurchase ?? 99,
-  pesticide: FARM_SUPPLIES.pesticide?.maxPurchase ?? 99,
-  medicine: FARM_SUPPLIES.medicine?.maxPurchase ?? 99,
 };

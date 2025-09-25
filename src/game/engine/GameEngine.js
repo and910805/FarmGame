@@ -12,19 +12,6 @@ import {
   MAX_FARM_PLOTS,
 } from './constants';
 
-export {
-  ANIMAL_CARE_ACTIONS,
-  ANIMAL_CAPACITY_STEP,
-  BASE_ANIMAL_CAPACITY,
-  BASE_FARM_PLOTS,
-  BUILDING_UPGRADES,
-  FARM_EXPANSION_BATCH,
-  getAnimalHousingExpansionCost,
-  getFarmExpansionCost,
-  MAX_ANIMAL_CAPACITY,
-  MAX_FARM_PLOTS,
-} from './constants';
-
 export class GameEngine {
   constructor({ stateRef, setters, notifier }) {
     this.stateRef = stateRef;
