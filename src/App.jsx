@@ -1,8 +1,28 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { Sprout, Coins, ShoppingCart, Heart, Home, Sun, Moon, Zap, Droplets, Hammer, Building, Star, Save, Trophy, Settings, MessageCircle, Target, UtensilsCrossed, TrendingUp, TrendingDown, Clock3, Boxes, Sparkles } from 'lucide-react';
+import { Sprout, Coins, ShoppingCart, Heart, Home, Sun, Moon, Zap, Droplets, Hammer, Building, Star, Save, Trophy, Settings, MessageCircle, Target, UtensilsCrossed, TrendingUp, TrendingDown, Clock3, Boxes, Sparkles, Pencil, Check, X, Gem } from 'lucide-react';
 import { CROPS, ANIMALS, BUILDINGS, TOOLS, ACHIEVEMENTS, NPCS, WEATHER_TYPES, SEASONS, FARM_SUPPLIES, ANIMAL_PRODUCTS } from './game/data/GameCatalog';
 import { GameFormatter } from './game/utils/GameFormatter';
-import { GameEngine, getFarmExpansionCost, getAnimalHousingExpansionCost, BASE_FARM_PLOTS, MAX_FARM_PLOTS, BASE_ANIMAL_CAPACITY, MAX_ANIMAL_CAPACITY, FARM_EXPANSION_BATCH, ANIMAL_CAPACITY_STEP, BUILDING_UPGRADES, ANIMAL_CARE_ACTIONS } from './game/engine/GameEngine';
+import { GameEngine } from './game/engine/GameEngine';
+import {
+  getFarmExpansionCost,
+  getAnimalHousingExpansionCost,
+  BASE_FARM_PLOTS,
+  MAX_FARM_PLOTS,
+  BASE_ANIMAL_CAPACITY,
+  MAX_ANIMAL_CAPACITY,
+  FARM_EXPANSION_BATCH,
+  ANIMAL_CAPACITY_STEP,
+  BUILDING_UPGRADES,
+  ANIMAL_CARE_ACTIONS,
+  ANIMAL_TRAITS,
+  ANIMAL_TRAIT_MAP,
+  ANIMAL_MIN_BUTCHER_AGE_DAYS,
+  pickAnimalTraitKey,
+  getEnergyCapacity,
+  getRestRecoveryAmount,
+  ENERGY_RESTS_PER_DAY,
+  ENERGY_DRINK_RECOVERY,
+} from './game/engine/constants';
 import { SaveManager } from './game/engine/SaveManager';
 import { NotificationCenter } from './game/engine/NotificationCenter';
 import { createInitialInventory, INVENTORY_METADATA, INVENTORY_ORDER } from './game/state/InventoryState';
@@ -427,6 +447,7 @@ const FarmGame = () => {
   // 基本狀態
   const [money, setMoney] = useState(500);
   const [energy, setEnergy] = useState(100);
+  const [restCharges, setRestCharges] = useState(ENERGY_RESTS_PER_DAY);
   const [level, setLevel] = useState(1);
   const [experience, setExperience] = useState(0);
   const [time, setTime] = useState(6);
@@ -456,6 +477,7 @@ const FarmGame = () => {
     fertilizer: 0,
     pesticide: 0,
     medicine: 0,
+    energyDrink: 0,
   });
 
   const [questLog, setQuestLog] = useState({});
@@ -463,6 +485,8 @@ const FarmGame = () => {
 
   const [animals, setAnimals] = useState([]);
   const [animalCapacity, setAnimalCapacity] = useState(BASE_ANIMAL_CAPACITY);
+  const [renamingAnimalId, setRenamingAnimalId] = useState(null);
+  const [pendingAnimalName, setPendingAnimalName] = useState('');
   const [buildings, setBuildings] = useState({});
   const [tools, setTools] = useState('basic');
   const [ownedTools, setOwnedTools] = useState(() => ['basic']);
@@ -490,6 +514,7 @@ const FarmGame = () => {
   const [inventorySortMode, setInventorySortMode] = useState('value');
 
   const stateRef = useRef({});
+  const newbornAnimalsRef = useRef([]);
 
   const notificationCenter = useMemo(() => new NotificationCenter(setNotifications), []);
   const addNotification = useCallback((message, options) => {
@@ -498,6 +523,96 @@ const FarmGame = () => {
   const dismissNotification = useCallback((id) => {
     notificationCenter.dismiss(id);
   }, [notificationCenter]);
+
+  const startAnimalRename = useCallback((animal) => {
+    if (!animal) {
+      return;
+    }
+    setRenamingAnimalId(animal.id);
+    setPendingAnimalName(animal.name || '');
+  }, []);
+
+  const cancelAnimalRename = useCallback(() => {
+    setRenamingAnimalId(null);
+    setPendingAnimalName('');
+  }, []);
+
+  const promptAnimalNaming = useCallback((animalId, suggestedName = '') => {
+    if (!animalId) {
+      return;
+    }
+    setRenamingAnimalId(animalId);
+    setPendingAnimalName(suggestedName || '');
+  }, []);
+
+  const commitAnimalRename = useCallback(() => {
+    if (!renamingAnimalId) {
+      return;
+    }
+
+    let finalizedName = null;
+    setAnimals(prevAnimals => {
+      if (!Array.isArray(prevAnimals) || prevAnimals.length === 0) {
+        return prevAnimals;
+      }
+
+      const targetIndex = prevAnimals.findIndex(entry => entry.id === renamingAnimalId);
+      if (targetIndex === -1) {
+        return prevAnimals;
+      }
+
+      const targetAnimal = prevAnimals[targetIndex];
+      const sanitizedInput = pendingAnimalName.replace(/\s+/g, ' ').trim().slice(0, 20);
+      const others = prevAnimals.filter(entry => entry.id !== renamingAnimalId);
+      const usedNames = new Set(others.map(entry => entry.name).filter(Boolean));
+      const baseLabel = ANIMALS[targetAnimal.type]?.name || '動物';
+      let candidate = sanitizedInput;
+
+      if (!candidate) {
+        let suffix = 1;
+        candidate = `${baseLabel}${suffix}`;
+        while (usedNames.has(candidate)) {
+          suffix += 1;
+          candidate = `${baseLabel}${suffix}`;
+        }
+      } else if (usedNames.has(candidate)) {
+        let suffix = 2;
+        while (usedNames.has(`${candidate} (${suffix})`)) {
+          suffix += 1;
+        }
+        candidate = `${candidate} (${suffix})`;
+      }
+
+      finalizedName = candidate;
+      const nextAnimals = prevAnimals.map(entry => (
+        entry.id === renamingAnimalId
+          ? { ...entry, name: candidate }
+          : entry
+      ));
+      stateRef.current.animals = nextAnimals;
+      return nextAnimals;
+    });
+
+    if (finalizedName) {
+      addNotification(`🐾 ${finalizedName} 很喜歡這個名字！`, { type: 'success' });
+    }
+    setRenamingAnimalId(null);
+    setPendingAnimalName('');
+  }, [renamingAnimalId, pendingAnimalName, setAnimals, addNotification]);
+
+  const handleAnimalRenameChange = useCallback((event) => {
+    setPendingAnimalName(event.target.value);
+  }, []);
+
+  const handleAnimalRenameKeyDown = useCallback((event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      commitAnimalRename();
+    } else if (event.key === 'Escape') {
+      event.preventDefault();
+      cancelAnimalRename();
+    }
+  }, [commitAnimalRename, cancelAnimalRename]);
 
   const questManager = useMemo(() => new QuestManager({
     stateRef,
@@ -512,6 +627,23 @@ const FarmGame = () => {
     () => questManager.buildQuestDefinitions(dynamicQuests),
     [questManager, dynamicQuests],
   );
+
+  // 新功能狀態
+  const [completedAchievements, setCompletedAchievements] = useState(new Set());
+  const [aiAdvice, setAiAdvice] = useState('');
+  const [marketPrices, setMarketPrices] = useState({});
+  const [previousMarketPrices, setPreviousMarketPrices] = useState({});
+  const [marketUpdateTime, setMarketUpdateTime] = useState(null);
+  const [dailyStats, setDailyStats] = useState([]);
+  const [lifetimeStats, setLifetimeStats] = useState({ cropsPlanted: 0 });
+  const [automation, setAutomation] = useState({ autoWater: false, autoHarvest: false });
+  const [seasonalEvents, setSeasonalEvents] = useState([]);
+  const [seasonalEventHistory, setSeasonalEventHistory] = useState({});
+  const [weatherMissions, setWeatherMissions] = useState([]);
+  const [weatherMissionHistory, setWeatherMissionHistory] = useState({});
+  const [marketCommissions, setMarketCommissions] = useState([]);
+  const [commissionHistory, setCommissionHistory] = useState({});
+  const [marketBoosts, setMarketBoosts] = useState({});
 
   const handleDailyEvents = useCallback((newDay, effectiveSeason, currentWeather) => {
     const dayInSeason = ((newDay - 1) % 30) + 1;
@@ -675,7 +807,7 @@ const FarmGame = () => {
     if (Object.keys(commissionHistoryUpdates).length > 0) {
       setCommissionHistory(prev => ({ ...(prev || {}), ...commissionHistoryUpdates }));
     }
-  }, [addNotification, setSeasonalEvents, setSeasonalEventHistory, setWeatherMissions, setWeatherMissionHistory, setMarketCommissions, setCommissionHistory, stateRef]);
+  }, [addNotification, promptAnimalNaming, setSeasonalEvents, setSeasonalEventHistory, setWeatherMissions, setWeatherMissionHistory, setMarketCommissions, setCommissionHistory, stateRef]);
 
   useEffect(() => {
     questManager.refreshDaily(day);
@@ -712,23 +844,20 @@ const FarmGame = () => {
       energyReduction,
     };
   }, [tools, toolLevels]);
-  
-  // 新功能狀態
-  const [completedAchievements, setCompletedAchievements] = useState(new Set());
-  const [aiAdvice, setAiAdvice] = useState('');
-  const [marketPrices, setMarketPrices] = useState({});
-  const [previousMarketPrices, setPreviousMarketPrices] = useState({});
-  const [marketUpdateTime, setMarketUpdateTime] = useState(null);
-  const [dailyStats, setDailyStats] = useState([]);
-  const [automation, setAutomation] = useState({ autoWater: false, autoHarvest: false });
-  const [seasonalEvents, setSeasonalEvents] = useState([]);
-  const [seasonalEventHistory, setSeasonalEventHistory] = useState({});
-  const [weatherMissions, setWeatherMissions] = useState([]);
-  const [weatherMissionHistory, setWeatherMissionHistory] = useState({});
-  const [marketCommissions, setMarketCommissions] = useState([]);
-  const [commissionHistory, setCommissionHistory] = useState({});
-  const [marketBoosts, setMarketBoosts] = useState({});
 
+  const energyCap = useMemo(
+    () => getEnergyCapacity(level, buildings),
+    [level, buildings],
+  );
+  const restRecovery = useMemo(
+    () => getRestRecoveryAmount(level, buildings),
+    [level, buildings],
+  );
+  const energyDrinkCount = farmSupplies?.energyDrink || 0;
+  const canRest = restCharges > 0 && energy < energyCap;
+  const canUseEnergyDrink = energyDrinkCount > 0 && energy < energyCap;
+  const drinkRecoveryPreview = Math.min(ENERGY_DRINK_RECOVERY, Math.max(0, energyCap - energy));
+  
   // 存檔狀態
   const [saveSlots, setSaveSlots] = useState({
     slot1: null,
@@ -743,6 +872,8 @@ const FarmGame = () => {
   stateRef.current = {
     money,
     energy,
+    energyCap,
+    restCharges,
     level,
     experience,
     time,
@@ -762,6 +893,7 @@ const FarmGame = () => {
     toolLevels,
     completedAchievements,
     dailyStats,
+    lifetimeStats,
     automation,
     marketPrices,
     previousMarketPrices,
@@ -784,6 +916,16 @@ const FarmGame = () => {
     dynamicQuests,
   };
 
+  useEffect(() => {
+    if (energy > energyCap) {
+      setEnergy(prev => {
+        const next = Math.min(energyCap, prev);
+        stateRef.current.energy = next;
+        return next;
+      });
+    }
+  }, [energy, energyCap, setEnergy]);
+
   const saveManager = useMemo(() => new SaveManager({
     stateRef,
     setters: {
@@ -800,6 +942,7 @@ const FarmGame = () => {
       setFarm,
       setAnimals,
       setAnimalCapacity,
+      setRestCharges,
       setBuildings,
       setTools,
       setOwnedTools,
@@ -808,6 +951,7 @@ const FarmGame = () => {
       setQuestLog,
       setCompletedAchievements,
       setDailyStats,
+      setLifetimeStats,
       setAutomation,
       setMarketPrices,
       setPreviousMarketPrices,
@@ -844,6 +988,7 @@ const FarmGame = () => {
       setFarm,
       setEnergy,
       setExperience,
+      setLifetimeStats,
       setInventory,
       setFarmSupplies,
       setAnimals,
@@ -857,9 +1002,10 @@ const FarmGame = () => {
       setToolLevels,
       setPendingGreenhousePlacement,
       recordQuestEvent,
+      promptAnimalNaming,
     },
     notifier: addNotification,
-  }), [stateRef, addNotification, recordQuestEvent]);
+  }), [stateRef, addNotification, recordQuestEvent, promptAnimalNaming]);
 
   const sprinklerLevel = useMemo(
     () => gameEngine.getBuildingLevel(buildings, 'sprinkler'),
@@ -1145,7 +1291,13 @@ const FarmGame = () => {
       const advices = [
         weather === 'sunny' ? '☀️ 晴天適合種植番茄和草莓！' : '',
         weather === 'rainy' ? '🌧️ 雨天作物會自動澆水，適合種植小麥！' : '',
-        energy < 30 ? '⚡ 體力不足，建議休息或升級工具！' : '',
+        energy < Math.min(30, Math.floor(energyCap * 0.35)) ? '⚡ 體力不足，記得休息或升級工具！' : '',
+        restCharges > 0 && energy < energyCap && (energyCap - energy) >= Math.max(10, Math.floor(restRecovery * 0.75))
+          ? `🛏️ 還有 ${restCharges} 次小憩機會，稍作休息可恢復體力！`
+          : '',
+        (farmSupplies?.energyDrink || 0) > 0 && energy < energyCap && (energyCap - energy) >= ENERGY_DRINK_RECOVERY / 2
+          ? '🥤 倉庫有精力飲料，緊湊行程時別忘了補充！'
+          : '',
         money > 2000 ? '💰 資金充足，考慮建造新建築！' : '',
         safeAnimals.some(a => (a.happiness ?? 50) < 40) ? '🐾 有動物心情低落，餵食或陪伴牠們吧！' : '',
         safeAnimals.some(a => (a.hunger ?? 60) < 35) ? '🍽️ 有動物快餓扁了，趕快餵牠們！' : '',
@@ -1165,7 +1317,7 @@ const FarmGame = () => {
     const timer = setInterval(generateAdvice, 60000);
     generateAdvice();
     return () => clearInterval(timer);
-  }, [weather, energy, money, animals, inventory, farm]);
+  }, [weather, energy, energyCap, restCharges, restRecovery, money, animals, inventory, farmSupplies, farm]);
 
   // 動態市場價格
   useEffect(() => {
@@ -1194,10 +1346,19 @@ const FarmGame = () => {
     ACHIEVEMENTS.forEach(achievement => {
       if (!completedAchievements.has(achievement.id)) {
         let unlocked = false;
-        
+
         switch (achievement.id) {
           case 'firstPlant':
             unlocked = farm.some(plot => plot.crop);
+            break;
+          case 'planter100':
+            unlocked = (lifetimeStats?.cropsPlanted || 0) >= 100;
+            break;
+          case 'planter500':
+            unlocked = (lifetimeStats?.cropsPlanted || 0) >= 500;
+            break;
+          case 'planter1000':
+            unlocked = (lifetimeStats?.cropsPlanted || 0) >= 1000;
             break;
           case 'richFarmer':
             unlocked = money >= 10000;
@@ -1223,7 +1384,7 @@ const FarmGame = () => {
         }
       }
     });
-  }, [money, animals, buildings, level, farm, completedAchievements, addNotification]);
+  }, [money, animals, buildings, level, farm, completedAchievements, addNotification, lifetimeStats]);
 
   // 時間系統
   useEffect(() => {
@@ -1248,12 +1409,25 @@ const FarmGame = () => {
           }
 
           handleDailyEvents(upcomingDay, nextSeasonValue, currentWeather);
-          setEnergy(100);
+          const currentLevel = stateRef.current.level || level;
+          const currentBuildings = stateRef.current.buildings || buildings;
+          const nextEnergyCap = getEnergyCapacity(currentLevel, currentBuildings);
+          setEnergy(() => {
+            stateRef.current.energy = nextEnergyCap;
+            return nextEnergyCap;
+          });
+          setRestCharges(() => {
+            stateRef.current.restCharges = ENERGY_RESTS_PER_DAY;
+            return ENERGY_RESTS_PER_DAY;
+          });
 
           // 動物每日狀態與收入結算
           const producedGoods = {};
+          newbornAnimalsRef.current = [];
           setAnimals(prevAnimals => {
+            const localNewborns = [];
             if (!Array.isArray(prevAnimals) || prevAnimals.length === 0) {
+              newbornAnimalsRef.current = localNewborns;
               return prevAnimals;
             }
 
@@ -1265,7 +1439,6 @@ const FarmGame = () => {
             const sickAnimals = [];
             const outbreakVictims = [];
             const overcrowdAlerts = [];
-            const newbornAnimals = [];
             const careReminders = [];
             const careWarnings = [];
             const dirtyPens = [];
@@ -1283,9 +1456,20 @@ const FarmGame = () => {
               const animalData = ANIMALS[animal.type];
               const shelterKey = animalData.shelter;
               const boost = gameEngine.getShelterBoost(buildings, shelterKey);
+              const traitMeta = animal.trait ? ANIMAL_TRAIT_MAP[animal.trait] : null;
+              const traitModifiers = traitMeta?.modifiers || {};
+              const hungerLossFactor = traitModifiers.hungerLoss ?? 1;
+              const happinessDecayFactor = traitModifiers.happinessDecay ?? 1;
+              const bondDecayFactor = traitModifiers.bondDecay ?? 1;
+              const cleanlinessDecayFactor = traitModifiers.cleanlinessDecay ?? 1;
+              const sicknessRiskFactor = traitModifiers.sicknessRisk ?? 1;
+              const productionFactor = traitModifiers.production ?? 1;
+              const hungerMoodPenaltyFactor = traitModifiers.hungerMoodPenalty ?? 1;
 
               const previousHunger = animal.hunger ?? 60;
-              const hunger = Math.max(0, previousHunger - ANIMAL_ECOLOGY_CONFIG.dailyHungerLoss);
+              const hungerLoss = ANIMAL_ECOLOGY_CONFIG.dailyHungerLoss * hungerLossFactor;
+              const hunger = Math.max(0, previousHunger - hungerLoss);
+              const nextAge = Math.max(0, Math.floor((animal.age ?? 0) + 1));
 
               if (hunger <= 0) {
                 starvationLosses.push(animal.name);
@@ -1293,15 +1477,16 @@ const FarmGame = () => {
               }
 
               const baseHappiness = animal.happiness ?? animalData.happiness;
-              let happiness = Math.max(0, baseHappiness - ANIMAL_ECOLOGY_CONFIG.happinessDecay);
+              const happinessDecay = ANIMAL_ECOLOGY_CONFIG.happinessDecay * happinessDecayFactor;
+              let happiness = Math.max(0, baseHappiness - happinessDecay);
               let sick = Boolean(animal.sick);
               const wasSick = Boolean(animal.sick);
               let sicknessDays = animal.sicknessDays ?? (wasSick ? 1 : 0);
 
               let bond = Math.max(0, animal.bond ?? 0);
-              bond = Math.max(0, Math.min(100, bond - ANIMAL_INTERACTION_CONFIG.bondDecay));
+              bond = Math.max(0, Math.min(100, bond - (ANIMAL_INTERACTION_CONFIG.bondDecay * bondDecayFactor)));
               let cleanliness = Math.max(0, animal.cleanliness ?? 80);
-              cleanliness = Math.max(0, Math.min(100, cleanliness - ANIMAL_INTERACTION_CONFIG.cleanlinessDecay));
+              cleanliness = Math.max(0, Math.min(100, cleanliness - (ANIMAL_INTERACTION_CONFIG.cleanlinessDecay * cleanlinessDecayFactor)));
 
               let careNeed = animal.careNeed && ANIMAL_CARE_ACTIONS[animal.careNeed] ? animal.careNeed : null;
               let careDays = Math.max(0, animal.careDays ?? 0);
@@ -1340,7 +1525,7 @@ const FarmGame = () => {
                     if (careDays >= 3) {
                       careWarnings.push(`${animal.name}（${meta.shortLabel}）`);
                     }
-                    const sicknessChance = ANIMAL_INTERACTION_CONFIG.neglectSicknessChance * Math.max(1, careDays - 1);
+                    const sicknessChance = ANIMAL_INTERACTION_CONFIG.neglectSicknessChance * Math.max(1, careDays - 1) * sicknessRiskFactor;
                     if (!sick && Math.random() < sicknessChance) {
                       sick = true;
                       newlySick.push(animal.name);
@@ -1355,17 +1540,20 @@ const FarmGame = () => {
 
               if (hunger <= ANIMAL_ECOLOGY_CONFIG.severeHungerThreshold) {
                 hungryNames.push(`${animal.name}（急需餵食）`);
-                happiness = Math.max(0, happiness - ANIMAL_ECOLOGY_CONFIG.severeHungerPenalty);
+                happiness = Math.max(0, happiness - (ANIMAL_ECOLOGY_CONFIG.severeHungerPenalty * hungerMoodPenaltyFactor));
                 canProduce = false;
               } else if (hunger <= ANIMAL_ECOLOGY_CONFIG.hungerWarningThreshold) {
                 hungryNames.push(animal.name);
-                happiness = Math.max(0, happiness - ANIMAL_ECOLOGY_CONFIG.moderateHungerPenalty);
+                happiness = Math.max(0, happiness - (ANIMAL_ECOLOGY_CONFIG.moderateHungerPenalty * hungerMoodPenaltyFactor));
                 canProduce = happiness > 30;
               }
 
               if (!sick && (hunger <= ANIMAL_ECOLOGY_CONFIG.sicknessTriggerThreshold || happiness <= ANIMAL_ECOLOGY_CONFIG.sicknessTriggerThreshold)) {
-                sick = true;
-                newlySick.push(animal.name);
+                const triggerChance = Math.min(1, Math.max(0, sicknessRiskFactor));
+                if (Math.random() < triggerChance) {
+                  sick = true;
+                  newlySick.push(animal.name);
+                }
               }
 
               if (cleanliness < ANIMAL_INTERACTION_CONFIG.cleanlinessThreshold) {
@@ -1376,7 +1564,7 @@ const FarmGame = () => {
                 filthyPens.push(animal.name);
                 happiness = Math.max(0, happiness - ANIMAL_INTERACTION_CONFIG.severeCleanlinessPenalty);
                 bond = Math.max(0, bond - 1);
-                if (!sick && Math.random() < ANIMAL_INTERACTION_CONFIG.cleanlinessSicknessChance) {
+                if (!sick && Math.random() < ANIMAL_INTERACTION_CONFIG.cleanlinessSicknessChance * sicknessRiskFactor) {
                   sick = true;
                   newlySick.push(animal.name);
                 }
@@ -1402,11 +1590,11 @@ const FarmGame = () => {
                 if (animalData.product && ANIMAL_PRODUCTS[animalData.product]) {
                   const productKey = animalData.product;
                   const baseUnits = 1;
-                  const units = Math.max(1, Math.round(baseUnits * boost * (happiness / 100)));
+                  const units = Math.max(1, Math.round(baseUnits * boost * (happiness / 100) * productionFactor));
                   productReady += units;
                   producedGoods[productKey] = (producedGoods[productKey] || 0) + units;
                 } else {
-                  income = Math.floor((animalData.income || 0) * boost * (happiness / 100));
+                  income = Math.floor((animalData.income || 0) * boost * (happiness / 100) * productionFactor);
                 }
               }
               totalIncome += income;
@@ -1436,6 +1624,7 @@ const FarmGame = () => {
                 cleanliness: Math.max(0, Math.min(100, cleanliness)),
                 careNeed: careNeed || null,
                 careDays: careNeed ? careDays : 0,
+                age: nextAge,
               });
               return list;
             }, []);
@@ -1517,8 +1706,8 @@ const FarmGame = () => {
                   typeCounts[type] = (typeCounts[type] || 0) + 1;
                   const babyIndex = typeCounts[type];
                   const babyName = `${data.name}寶寶${babyIndex}`;
-                  newbornAnimals.push({
-                    id: Date.now() + newbornAnimals.length + Math.floor(Math.random() * 1000),
+                  localNewborns.push({
+                    id: Date.now() + localNewborns.length + Math.floor(Math.random() * 1000),
                     type,
                     happiness: data.happiness,
                     hunger: 68,
@@ -1532,6 +1721,9 @@ const FarmGame = () => {
                     careNeed: null,
                     careDays: 0,
                     lastCareTime: null,
+                    trait: pickAnimalTraitKey(type) || 'steadfast',
+                    age: 0,
+                    butcherableOnDay: upcomingDay + ANIMAL_MIN_BUTCHER_AGE_DAYS,
                   });
                   availableSlots -= 1;
                 }
@@ -1597,15 +1789,22 @@ const FarmGame = () => {
               addNotification(`🧹 ${regularDirty.join('、')} 的欄舍需要整理，保持清潔讓牠們更安心。`, { type: 'warning' });
             }
 
-            if (newbornAnimals.length > 0) {
-              const names = newbornAnimals.map(animal => animal.name).join('、');
+            if (localNewborns.length > 0) {
+              const names = localNewborns.map(animal => animal.name).join('、');
               addNotification(`🐣 ${names} 出生了，農場又更熱鬧了！`, { type: 'success' });
             }
 
-            const nextAnimals = [...processedAnimals, ...newbornAnimals];
+            const nextAnimals = [...processedAnimals, ...localNewborns];
             stateRef.current.animals = nextAnimals;
+            newbornAnimalsRef.current = localNewborns;
             return nextAnimals;
           });
+
+          const newbornAnimalsCaptured = newbornAnimalsRef.current;
+          if (newbornAnimalsCaptured.length > 0) {
+            const firstNewborn = newbornAnimalsCaptured[0];
+            promptAnimalNaming(firstNewborn.id, firstNewborn.name || '');
+          }
 
           if (Object.keys(producedGoods).length > 0) {
             const produceSummary = Object.entries(producedGoods).map(([productKey, amount]) => {
@@ -1931,9 +2130,41 @@ const FarmGame = () => {
     gameEngine.buySupply(supplyType, { quantity });
   }, [gameEngine]);
 
-  const selectSupply = useCallback((supplyType) => {
-    gameEngine.selectSupply(supplyType);
+  const consumeEnergyDrink = useCallback(() => {
+    gameEngine.drinkEnergySupply();
   }, [gameEngine]);
+
+  const selectSupply = useCallback((supplyType) => {
+    if (supplyType === 'energyDrink') {
+      consumeEnergyDrink();
+      return;
+    }
+    gameEngine.selectSupply(supplyType);
+  }, [gameEngine, consumeEnergyDrink]);
+
+  const restAtHome = useCallback(() => {
+    if (energy >= energyCap) {
+      addNotification('體力已經滿滿的囉！', { type: 'info' });
+      return;
+    }
+    if (restCharges <= 0) {
+      addNotification('今天的休息次數已用完，試著喝瓶精力飲料吧！', { type: 'warning' });
+      return;
+    }
+
+    const recoverable = Math.min(restRecovery, energyCap - energy);
+    setEnergy(prev => {
+      const next = Math.min(energyCap, prev + recoverable);
+      stateRef.current.energy = next;
+      return next;
+    });
+    setRestCharges(prev => {
+      const next = Math.max(0, prev - 1);
+      stateRef.current.restCharges = next;
+      return next;
+    });
+    addNotification(`小憩片刻，恢復 ${recoverable} 體力！`, { type: 'success' });
+  }, [energy, energyCap, restCharges, restRecovery, setEnergy, setRestCharges, addNotification]);
 
   const applySupply = useCallback((plotId) => gameEngine.applySupply(plotId), [gameEngine]);
 
@@ -2073,9 +2304,33 @@ const FarmGame = () => {
             <Coins className="w-5 h-5 text-yellow-400" />
             <span className="font-bold">${money}</span>
           </div>
-          <div className="flex items-center space-x-1">
-            <Zap className="w-5 h-5 text-blue-400" />
-            <span>{energy}/100</span>
+          <div className="flex items-center space-x-2">
+            <div className="flex items-center space-x-1">
+              <Zap className="w-5 h-5 text-blue-200" />
+              <span>{Math.round(energy)}/{energyCap}</span>
+            </div>
+            <button
+              onClick={restAtHome}
+              disabled={!canRest}
+              className={`text-xs px-2 py-[2px] rounded-full border transition-colors ${
+                canRest
+                  ? 'bg-white/20 hover:bg-white/30 border-white/50 text-white'
+                  : 'bg-white/5 border-white/20 text-white/50 cursor-not-allowed'
+              }`}
+            >
+              小憩 +{Math.round(restRecovery)}
+            </button>
+            <button
+              onClick={consumeEnergyDrink}
+              disabled={!canUseEnergyDrink}
+              className={`text-xs px-2 py-[2px] rounded-full border transition-colors ${
+                canUseEnergyDrink
+                  ? 'bg-pink-500/30 hover:bg-pink-500/40 border-pink-200 text-white'
+                  : 'bg-white/5 border-white/20 text-white/50 cursor-not-allowed'
+              }`}
+            >
+              精力 +{Math.round(drinkRecoveryPreview)} ({energyDrinkCount})
+            </button>
           </div>
           <div className="flex items-center space-x-1">
             <Star className="w-5 h-5 text-yellow-400" />
@@ -2231,6 +2486,17 @@ const FarmGame = () => {
                 );
               })}
             </div>
+            <div className="mb-4 flex flex-wrap items-center gap-2 text-xs">
+              <span className="px-2 py-1 rounded-full bg-blue-100/80 text-blue-800 border border-blue-200/70">
+                體力上限 {energyCap}
+              </span>
+              <span className="px-2 py-1 rounded-full bg-sky-100/80 text-sky-800 border border-sky-200/70">
+                今日小憩剩餘 {restCharges} 次
+              </span>
+              <span className="px-2 py-1 rounded-full bg-pink-100/80 text-pink-800 border border-pink-200/70">
+                精力飲料庫存 {energyDrinkCount}
+              </span>
+            </div>
             {sprinklerLevel > 0 && (
               <div className="mb-4 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-700 flex items-center gap-2">
                 <Droplets className="w-3 h-3" />
@@ -2318,6 +2584,10 @@ const FarmGame = () => {
                     const careMeta = careNeed ? ANIMAL_CARE_ACTIONS[careNeed] : null;
                     const careDays = Math.max(0, animal.careDays ?? 0);
                     const careUrgent = careDays >= 3;
+                    const ageYears = Math.max(0, Math.floor(animal.age ?? 0));
+                    const traitInfo = animal.trait && ANIMAL_TRAIT_MAP[animal.trait]
+                      ? ANIMAL_TRAIT_MAP[animal.trait]
+                      : ANIMAL_TRAIT_MAP.steadfast;
                     return (
                       <div key={animal.id}
                            className={`rounded-lg p-3 transition-colors relative border ${
@@ -2342,7 +2612,61 @@ const FarmGame = () => {
                           <div className="text-3xl animate-bounce">
                             {animalData.emoji}
                           </div>
-                          <div className="text-sm font-semibold">{animal.name}</div>
+                          <div className="space-y-1">
+                            {renamingAnimalId === animal.id ? (
+                              <div className="flex items-center justify-center gap-1">
+                                <input
+                                  value={pendingAnimalName}
+                                  onChange={handleAnimalRenameChange}
+                                  onKeyDown={handleAnimalRenameKeyDown}
+                                  className="w-24 rounded border border-blue-200 px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-400"
+                                  maxLength={24}
+                                  autoFocus
+                                />
+                                <button
+                                  type="button"
+                                  onClick={commitAnimalRename}
+                                  className="p-1 rounded bg-green-500 hover:bg-green-600 text-white"
+                                  aria-label="儲存動物名稱"
+                                >
+                                  <Check className="w-3 h-3" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={cancelAnimalRename}
+                                  className="p-1 rounded bg-gray-200 hover:bg-gray-300 text-gray-700"
+                                  aria-label="取消重新命名"
+                                >
+                                  <X className="w-3 h-3" />
+                                </button>
+                              </div>
+                            ) : (
+                              <div className="flex items-center justify-center gap-2">
+                                <span className="text-sm font-semibold">{animal.name}</span>
+                                <button
+                                  type="button"
+                                  onClick={() => startAnimalRename(animal)}
+                                  className="text-xs text-blue-600 hover:text-blue-800"
+                                  aria-label="重新命名動物"
+                                >
+                                  <Pencil className="w-3 h-3" />
+                                </button>
+                              </div>
+                            )}
+                            <div className="flex items-center justify-center gap-1 text-[11px] text-slate-600">
+                              <Clock3 className="w-3 h-3" />
+                              <span>年齡 {ageYears} 歲</span>
+                            </div>
+                            {traitInfo && (
+                              <div
+                                className="flex items-center justify-center gap-1 text-[11px] text-amber-700"
+                                title={traitInfo.description}
+                              >
+                                <Gem className="w-3 h-3" />
+                                <span>{traitInfo.name}</span>
+                              </div>
+                            )}
+                          </div>
                           <div className="space-y-1 text-xs">
                             <div className="flex items-center justify-center gap-1">
                               <Heart className="w-3 h-3 text-red-400" />
@@ -3265,6 +3589,17 @@ const FarmGame = () => {
                 </ul>
               </section>
               <section>
+                <h3 className="font-semibold text-lg text-pink-600">🧬 動物特質</h3>
+                <p className="mt-2">每隻動物現在都會擁有隨機特質，會影響飢餓速度、生病風險或產量表現。試著照顧牠們的性格，善用優勢、彌補弱點！</p>
+                <ul className="list-disc pl-5 space-y-1 mt-2">
+                  {ANIMAL_TRAITS.map(trait => (
+                    <li key={trait.key}>
+                      <span className="font-semibold text-rose-500">{trait.name}</span>：{trait.description}
+                    </li>
+                  ))}
+                </ul>
+              </section>
+              <section>
                 <h3 className="font-semibold text-lg text-blue-600">🏠 建築與工具</h3>
                 <ul className="list-disc pl-5 space-y-1 mt-2">
                   <li>建築能提升產量或帶來特殊效果，例如溫室免受天氣影響、筒倉賣價 +10%。</li>
@@ -3274,7 +3609,9 @@ const FarmGame = () => {
               <section>
                 <h3 className="font-semibold text-lg text-sky-600">⚡ 體力、天氣與季節</h3>
                 <ul className="list-disc pl-5 space-y-1 mt-2">
-                  <li>每日體力上限 100，種植、澆水等行動會消耗體力。</li>
+                  <li>體力上限會隨等級與部分建築提升，升級工具則能降低消耗。</li>
+                  <li>每天清晨會回滿體力並重置 {ENERGY_RESTS_PER_DAY} 次「小憩」，每次大約恢復四分之一體力。</li>
+                  <li>精力飲料可立即補充大量體力，記得在農務用品保持庫存。</li>
                   <li>雨天會自動澆水，晴天適合日照作物，雪天則要小心成長變慢。</li>
                   <li>每 30 天進入新季節（春→夏→秋→冬），部分作物或動物在特定季節表現更好。</li>
                 </ul>

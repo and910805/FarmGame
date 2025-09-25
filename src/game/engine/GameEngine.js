@@ -1,95 +1,19 @@
 import { CROPS, ANIMALS, BUILDINGS, TOOLS, FARM_SUPPLIES, ANIMAL_PRODUCTS } from '../data/GameCatalog';
-
-export const BASE_FARM_PLOTS = 25;
-export const FARM_EXPANSION_BATCH = 1;
-export const MAX_FARM_PLOTS = 45;
-export const BASE_ANIMAL_CAPACITY = 6;
-export const ANIMAL_CAPACITY_STEP = 1;
-export const MAX_ANIMAL_CAPACITY = 24;
-
-export const ANIMAL_CARE_ACTIONS = {
-  playtime: {
-    key: 'playtime',
-    label: '陪牠玩耍',
-    shortLabel: '陪玩',
-    needLabel: '想玩耍',
-    description: '與動物一起玩耍可以大幅提升幸福度與羈絆，但會稍微增加飢餓感。',
-    energyCost: 6,
-    happinessBoost: 18,
-    bondBoost: 14,
-    hungerImpact: 14,
-  },
-  grooming: {
-    key: 'grooming',
-    label: '梳洗打理',
-    shortLabel: '梳洗',
-    needLabel: '想梳洗',
-    description: '細心梳洗讓動物保持乾淨舒適，降低生病風險並增加羈絆。',
-    energyCost: 5,
-    happinessBoost: 12,
-    bondBoost: 10,
-    cleanlinessBoost: 22,
-    sootheSickness: true,
-  },
-  cleanPen: {
-    key: 'cleanPen',
-    label: '清理欄舍',
-    shortLabel: '清理',
-    needLabel: '需要清理',
-    description: '整理環境讓欄舍更乾淨，恢復整潔度並讓動物更安心。',
-    energyCost: 7,
-    happinessBoost: 8,
-    bondBoost: 8,
-    cleanlinessBoost: 28,
-  },
-};
-
-export const getFarmExpansionCost = (currentPlotCount) => {
-  if (currentPlotCount >= MAX_FARM_PLOTS) {
-    return null;
-  }
-  const expansionsPurchased = Math.max(0, currentPlotCount - BASE_FARM_PLOTS);
-  return 1000 + (expansionsPurchased * 250);
-};
-
-export const getAnimalHousingExpansionCost = (currentCapacity) => {
-  if (currentCapacity >= MAX_ANIMAL_CAPACITY) {
-    return null;
-  }
-  return 2500;
-};
-
-export const BUILDING_UPGRADES = {
-  sprinkler: [
-    { level: 1, cost: 650, coverage: 12, manualWaterCost: 3, plantingDiscount: 3, description: '覆蓋 12 格農地，自動補水並減少播種體力。' },
-    { level: 2, cost: 900, coverage: 24, manualWaterCost: 2, plantingDiscount: 4, description: '覆蓋範圍擴大至 24 格，澆水幾乎不費力。' },
-    { level: 3, cost: 1400, coverage: 36, manualWaterCost: 1, plantingDiscount: 5, description: '灌溉到 36 格農地並極大幅度節省體力。' },
-    { level: 4, cost: 2200, coverage: MAX_FARM_PLOTS, manualWaterCost: 1, plantingDiscount: 6, description: '全區自動灌溉，維持土壤最佳濕度。' },
-  ],
-  silo: [
-    { level: 1, cost: 800, sellBonus: 0.05, description: '作物售價 +5%，減少腐壞。' },
-    { level: 2, cost: 1200, sellBonus: 0.1, description: '作物售價 +10%，可長期保存。' },
-    { level: 3, cost: 1800, sellBonus: 0.18, description: '作物售價 +18%，高效率倉儲。' },
-  ],
-  barn: [
-    { level: 1, cost: 1000, boost: 1.2, description: '提供牛羊穩定環境，提升產量。' },
-    { level: 2, cost: 1500, boost: 1.35, description: '擴增飼槽與溫控，提高品質。' },
-    { level: 3, cost: 2200, boost: 1.5, description: '頂級穀倉，讓牛羊更快樂。' },
-  ],
-  chickenCoop: [
-    { level: 1, cost: 500, boost: 1.3, description: '舒適雞舍，提升產蛋率。' },
-    { level: 2, cost: 850, boost: 1.45, description: '自動餵食設備維持穩定產量。' },
-    { level: 3, cost: 1200, boost: 1.6, description: '氣候調節雞舍，全年高產。' },
-  ],
-  pigPen: [
-    { level: 1, cost: 400, boost: 1.2, description: '泥土樂園讓豬豬更放鬆。' },
-    { level: 2, cost: 700, boost: 1.35, description: '增設噴霧與運動空間，提升肉質。' },
-  ],
-  pond: [
-    { level: 1, cost: 600, boost: 1.3, description: '自然池塘讓水鳥安心棲息。' },
-    { level: 2, cost: 950, boost: 1.45, description: '擴建浮台與遮蔭範圍。' },
-  ],
-};
+import {
+  ANIMAL_CARE_ACTIONS,
+  ANIMAL_CAPACITY_STEP,
+  BASE_ANIMAL_CAPACITY,
+  BASE_FARM_PLOTS,
+  BUILDING_UPGRADES,
+  FARM_EXPANSION_BATCH,
+  getAnimalHousingExpansionCost,
+  getFarmExpansionCost,
+  MAX_ANIMAL_CAPACITY,
+  MAX_FARM_PLOTS,
+  pickAnimalTraitKey,
+  ENERGY_DRINK_RECOVERY,
+  getEnergyCapacity,
+} from './constants';
 
 export class GameEngine {
   constructor({ stateRef, setters, notifier }) {
@@ -114,16 +38,33 @@ export class GameEngine {
     }
   }
 
-  consumeSupply(supplyType, { keepSelection = false } = {}) {
-    this.setters.setFarmSupplies(prev => {
-      const previous = prev || {};
-      const current = previous[supplyType] || 0;
-      return { ...previous, [supplyType]: Math.max(0, current - 1) };
-    });
+  getEnergyCap(overrides = {}) {
+    const levelValue = overrides.level ?? this.state.level ?? 1;
+    const buildingValue = overrides.buildings ?? this.state.buildings ?? {};
+    const normalizedLevel = Math.max(1, Math.floor(levelValue || 1));
+    return getEnergyCapacity(normalizedLevel, buildingValue);
+  }
 
-    if (!keepSelection) {
+  consumeSupply(supplyType, { keepSelection = false } = {}) {
+    let remaining = null;
+
+    if (typeof this.setters.setFarmSupplies === 'function') {
+      this.setters.setFarmSupplies(prev => {
+        const previous = prev || {};
+        const current = previous[supplyType] || 0;
+        const nextCount = Math.max(0, current - 1);
+        const updated = { ...previous, [supplyType]: nextCount };
+        this.stateRef.current.farmSupplies = updated;
+        remaining = nextCount;
+        return updated;
+      });
+    }
+
+    if (!keepSelection && typeof this.setters.setSelectedSupply === 'function') {
       this.setters.setSelectedSupply(null);
     }
+
+    return remaining;
   }
 
   getGreenhouseCount(buildings = this.state.buildings) {
@@ -390,10 +331,14 @@ export class GameEngine {
     }
 
     this.setters.setMoney(prev => prev - totalCost);
-    this.setters.setFarmSupplies(prev => {
-      const previous = prev || {};
-      return { ...previous, [supplyType]: (previous[supplyType] || 0) + quantity };
-    });
+    if (typeof this.setters.setFarmSupplies === 'function') {
+      this.setters.setFarmSupplies(prev => {
+        const previous = prev || {};
+        const updated = { ...previous, [supplyType]: (previous[supplyType] || 0) + quantity };
+        this.stateRef.current.farmSupplies = updated;
+        return updated;
+      });
+    }
     this.notify(`購買了 ${quantity} 份${supply.name}！`, { type: 'success' });
   }
 
@@ -491,6 +436,11 @@ export class GameEngine {
       return;
     }
 
+    if (supplyType === 'energyDrink') {
+      this.drinkEnergySupply();
+      return;
+    }
+
     const { selectedSupply } = this.state;
     if (selectedSupply === supplyType) {
       this.setters.setSelectedSupply(null);
@@ -510,6 +460,14 @@ export class GameEngine {
     if (!supply) {
       this.setters.setSelectedSupply(null);
       return false;
+    }
+
+    if (selectedSupply === 'energyDrink') {
+      this.notify('精力飲料請在體力面板飲用！', { type: 'info' });
+      if (typeof this.setters.setSelectedSupply === 'function') {
+        this.setters.setSelectedSupply(null);
+      }
+      return true;
     }
 
     if (selectedSupply === 'medicine') {
@@ -579,8 +537,41 @@ export class GameEngine {
     return false;
   }
 
+  drinkEnergySupply() {
+    const { farmSupplies, energy } = this.state;
+    const available = farmSupplies?.energyDrink || 0;
+    if (available <= 0) {
+      this.notify('沒有精力飲料，先到農務用品補貨吧！', { type: 'warning' });
+      return false;
+    }
+
+    const capacity = this.getEnergyCap();
+    if (energy >= capacity) {
+      this.notify('體力已經飽滿，暫時不需要補充。', { type: 'info' });
+      return false;
+    }
+
+    const recovery = Math.min(ENERGY_DRINK_RECOVERY, capacity - energy);
+    const remaining = this.consumeSupply('energyDrink', { keepSelection: true });
+    if (remaining == null) {
+      return false;
+    }
+
+    if (typeof this.setters.setEnergy === 'function') {
+      this.setters.setEnergy(prev => {
+        const base = typeof prev === 'number' ? prev : energy;
+        const next = Math.min(capacity, base + recovery);
+        this.stateRef.current.energy = next;
+        return next;
+      });
+    }
+
+    this.notify(`喝下精力飲料，恢復 ${recovery} 體力！`, { type: 'success' });
+    return true;
+  }
+
   plantSeed(plotId) {
-    const { selectedSeed, tools, energy, money, inventory, season, farm } = this.state;
+    const { selectedSeed, tools, energy, money, inventory, season, farm, lifetimeStats } = this.state;
     if (!selectedSeed) return;
 
     const farmList = Array.isArray(farm) ? farm : [];
@@ -627,6 +618,19 @@ export class GameEngine {
       this.stateRef.current.farm = nextFarm;
       return nextFarm;
     });
+
+    if (typeof this.setters.setLifetimeStats === 'function') {
+      const previousStats = lifetimeStats && typeof lifetimeStats === 'object' ? lifetimeStats : {};
+      this.setters.setLifetimeStats(prev => {
+        const base = prev && typeof prev === 'object' ? prev : previousStats;
+        const nextStats = {
+          ...base,
+          cropsPlanted: (base?.cropsPlanted || 0) + 1,
+        };
+        this.stateRef.current.lifetimeStats = nextStats;
+        return nextStats;
+      });
+    }
 
     let remainingSeeds = storedSeeds;
     let remainingMoney = money;
@@ -764,7 +768,11 @@ export class GameEngine {
       return nextFarm;
     });
 
-    this.setters.setEnergy(prev => Math.max(0, prev - energyCost));
+    this.setters.setEnergy(prev => {
+      const next = Math.max(0, prev - energyCost);
+      this.stateRef.current.energy = next;
+      return next;
+    });
     this.notify('澆水完成！', { type: 'success' });
   }
 
@@ -796,29 +804,47 @@ export class GameEngine {
       return;
     }
 
+    const currentDay = Math.max(1, Math.floor(this.state.day ?? 1));
     this.setters.setMoney(prev => prev - (animal.price * purchasable));
+    let createdAnimals = [];
     this.setters.setAnimals(prev => {
       const prevList = Array.isArray(prev) ? prev : [];
       const baseIndex = prevList.filter(a => a.type === animalType).length;
       const timestamp = Date.now();
-      const additions = Array.from({ length: purchasable }, (_, index) => ({
-        id: timestamp + index,
-        type: animalType,
-        happiness: animal.happiness,
-        hunger: 70,
-        lastFed: Date.now(),
-        sick: false,
-        sicknessDays: 0,
-        name: `${animal.name}${baseIndex + index + 1}`,
-        productReady: 0,
-        bond: 20,
-        cleanliness: 85,
-        careNeed: null,
-        careDays: 0,
-        lastCareTime: null,
-      }));
-      return [...prevList, ...additions];
+      createdAnimals = Array.from({ length: purchasable }, (_, index) => {
+        const traitKey = pickAnimalTraitKey(animalType) || 'steadfast';
+        return {
+          id: timestamp + index,
+          type: animalType,
+          happiness: animal.happiness,
+          hunger: 70,
+          lastFed: Date.now(),
+          sick: false,
+          sicknessDays: 0,
+          name: `${animal.name}${baseIndex + index + 1}`,
+          productReady: 0,
+          bond: 20,
+          cleanliness: 85,
+          careNeed: null,
+          careDays: 0,
+          lastCareTime: null,
+          trait: traitKey,
+          age: 0,
+          butcherableOnDay: currentDay,
+        };
+      });
+      const nextAnimals = [...prevList, ...createdAnimals];
+      if (this.stateRef && this.stateRef.current) {
+        this.stateRef.current.animals = nextAnimals;
+      }
+      return nextAnimals;
     });
+
+    if (createdAnimals.length > 0 && typeof this.setters.promptAnimalNaming === 'function') {
+      const firstNewArrival = createdAnimals[0];
+      const suggestedName = createdAnimals.length === 1 ? (firstNewArrival.name || '') : '';
+      this.setters.promptAnimalNaming(firstNewArrival.id, suggestedName);
+    }
 
     const label = purchasable > 1 ? `${purchasable} 隻${animal.name}` : `${animal.name}`;
     this.notify(`購買了 ${animal.emoji} ${label}！`, { type: 'success' });
@@ -834,6 +860,14 @@ export class GameEngine {
     const animal = animals.find(a => a.id === animalId);
     if (!animal) {
       this.notify('找不到這隻動物。', { type: 'error' });
+      return;
+    }
+
+    const currentDay = Math.max(1, Math.floor(this.state.day ?? 1));
+    if (typeof animal.butcherableOnDay === 'number' && currentDay < animal.butcherableOnDay) {
+      const remaining = animal.butcherableOnDay - currentDay;
+      const waitLabel = remaining === 1 ? '1 天' : `${remaining} 天`;
+      this.notify(`${animal.name} 還是幼年，再過 ${waitLabel} 才能處理牠喔！`, { type: 'warning' });
       return;
     }
 

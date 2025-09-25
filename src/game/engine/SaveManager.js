@@ -6,7 +6,11 @@ import {
   MAX_FARM_PLOTS,
   BUILDING_UPGRADES,
   ANIMAL_CARE_ACTIONS,
-} from './GameEngine';
+  ANIMAL_TRAIT_MAP,
+  pickAnimalTraitKey,
+  ENERGY_RESTS_PER_DAY,
+  getEnergyCapacity,
+} from './constants';
 
 const createDefaultInventory = () => {
   const inventory = {};
@@ -52,6 +56,16 @@ const createDefaultSupplies = () => ({
   fertilizer: 0,
   pesticide: 0,
   medicine: 0,
+  energyDrink: 0,
+});
+
+const createDefaultLifetimeStats = () => ({
+  cropsPlanted: 0,
+});
+
+const withLifetimeStats = (stats) => ({
+  ...createDefaultLifetimeStats(),
+  ...(stats && typeof stats === 'object' ? stats : {}),
 });
 
 export class SaveManager {
@@ -105,6 +119,8 @@ export class SaveManager {
       marketCommissions,
       commissionHistory,
       marketBoosts,
+      lifetimeStats,
+      restCharges,
     } = this.state;
 
     const safeFarm = Array.isArray(farm) ? farm : [];
@@ -149,8 +165,10 @@ export class SaveManager {
       marketCommissions: Array.isArray(marketCommissions) ? marketCommissions : [],
       commissionHistory: commissionHistory && typeof commissionHistory === 'object' ? { ...commissionHistory } : {},
       marketBoosts: marketBoosts && typeof marketBoosts === 'object' ? { ...marketBoosts } : {},
+      lifetimeStats: withLifetimeStats(lifetimeStats),
+      restCharges: Math.min(ENERGY_RESTS_PER_DAY, Math.max(0, restCharges ?? ENERGY_RESTS_PER_DAY)),
       saveTime: new Date().toISOString(),
-      version: '1.1',
+      version: '1.3',
     };
   }
 
@@ -184,7 +202,6 @@ export class SaveManager {
 
   applyState(gameState) {
     this.setters.setMoney(gameState.money);
-    this.setters.setEnergy(gameState.energy);
     this.setters.setLevel(gameState.level);
     this.setters.setExperience(gameState.experience);
     this.setters.setTime(gameState.time);
@@ -195,6 +212,9 @@ export class SaveManager {
     const normalizedInventory = withInventoryDefaults(gameState.inventory);
     this.setters.setInventory(normalizedInventory);
     this.setters.setQuestLog(gameState.questLog ? { ...gameState.questLog } : {});
+    if (typeof this.setters.setLifetimeStats === 'function') {
+      this.setters.setLifetimeStats(withLifetimeStats(gameState.lifetimeStats));
+    }
     if (typeof this.setters.setDynamicQuests === 'function') {
       const dynamic = gameState.dynamicQuests && typeof gameState.dynamicQuests === 'object'
         ? { ...gameState.dynamicQuests }
@@ -341,6 +361,15 @@ export class SaveManager {
       delete normalizedBuildings.greenhouse;
     }
 
+    const normalizedLevel = Math.max(1, Math.floor(gameState.level || 1));
+    const energyCap = getEnergyCapacity(normalizedLevel, normalizedBuildings);
+    const requestedEnergy = typeof gameState.energy === 'number' ? gameState.energy : energyCap;
+    this.setters.setEnergy(Math.max(0, Math.min(energyCap, requestedEnergy)));
+    if (typeof this.setters.setRestCharges === 'function') {
+      const savedCharges = Math.max(0, Math.floor(gameState.restCharges ?? ENERGY_RESTS_PER_DAY));
+      this.setters.setRestCharges(Math.min(ENERGY_RESTS_PER_DAY, savedCharges));
+    }
+
     this.setters.setFarm(normalizedFarm);
     this.stateRef.current.farm = normalizedFarm;
     const baseSupplies = { ...createDefaultSupplies(), ...(gameState.farmSupplies || {}) };
@@ -363,6 +392,15 @@ export class SaveManager {
           careNeed: animal.careNeed && ANIMAL_CARE_ACTIONS[animal.careNeed] ? animal.careNeed : null,
           careDays: Math.max(0, Math.floor(animal.careDays ?? 0)),
           lastCareTime: animal.lastCareTime ?? null,
+          age: Math.max(0, Math.floor(animal.age ?? 0)),
+          butcherableOnDay: Math.max(1, Math.floor(animal.butcherableOnDay ?? 1)),
+          trait: (() => {
+            if (animal.trait && ANIMAL_TRAIT_MAP[animal.trait]) {
+              return animal.trait;
+            }
+            const generated = pickAnimalTraitKey(animal.type);
+            return generated || 'steadfast';
+          })(),
         }))
       : [];
     this.setters.setAnimals(sanitizedAnimals);
