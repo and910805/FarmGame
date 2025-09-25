@@ -2,7 +2,19 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { Sprout, Coins, ShoppingCart, Heart, Home, Sun, Moon, Zap, Droplets, Hammer, Building, Star, Save, Trophy, Settings, MessageCircle, Target, UtensilsCrossed, TrendingUp, TrendingDown, Clock3, Boxes, Sparkles } from 'lucide-react';
 import { CROPS, ANIMALS, BUILDINGS, TOOLS, ACHIEVEMENTS, NPCS, WEATHER_TYPES, SEASONS, FARM_SUPPLIES, ANIMAL_PRODUCTS } from './game/data/GameCatalog';
 import { GameFormatter } from './game/utils/GameFormatter';
-import { GameEngine, getFarmExpansionCost, getAnimalHousingExpansionCost, BASE_FARM_PLOTS, MAX_FARM_PLOTS, BASE_ANIMAL_CAPACITY, MAX_ANIMAL_CAPACITY, FARM_EXPANSION_BATCH, ANIMAL_CAPACITY_STEP, BUILDING_UPGRADES, ANIMAL_CARE_ACTIONS } from './game/engine/GameEngine';
+import { GameEngine } from './game/engine/GameEngine';
+import {
+  getFarmExpansionCost,
+  getAnimalHousingExpansionCost,
+  BASE_FARM_PLOTS,
+  MAX_FARM_PLOTS,
+  BASE_ANIMAL_CAPACITY,
+  MAX_ANIMAL_CAPACITY,
+  FARM_EXPANSION_BATCH,
+  ANIMAL_CAPACITY_STEP,
+  BUILDING_UPGRADES,
+  ANIMAL_CARE_ACTIONS,
+} from './game/engine/constants';
 import { SaveManager } from './game/engine/SaveManager';
 import { NotificationCenter } from './game/engine/NotificationCenter';
 import { createInitialInventory, INVENTORY_METADATA, INVENTORY_ORDER } from './game/state/InventoryState';

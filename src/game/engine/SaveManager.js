@@ -6,7 +6,7 @@ import {
   MAX_FARM_PLOTS,
   BUILDING_UPGRADES,
   ANIMAL_CARE_ACTIONS,
-} from './GameEngine';
+} from './constants';
 
 const createDefaultInventory = () => {
   const inventory = {};
