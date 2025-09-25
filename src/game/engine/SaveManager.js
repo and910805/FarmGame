@@ -6,6 +6,8 @@ import {
   MAX_FARM_PLOTS,
   BUILDING_UPGRADES,
   ANIMAL_CARE_ACTIONS,
+  ANIMAL_TRAIT_MAP,
+  pickAnimalTraitKey,
 } from './constants';
 
 const createDefaultInventory = () => {
@@ -377,6 +379,13 @@ export class SaveManager {
           careNeed: animal.careNeed && ANIMAL_CARE_ACTIONS[animal.careNeed] ? animal.careNeed : null,
           careDays: Math.max(0, Math.floor(animal.careDays ?? 0)),
           lastCareTime: animal.lastCareTime ?? null,
+          trait: (() => {
+            if (animal.trait && ANIMAL_TRAIT_MAP[animal.trait]) {
+              return animal.trait;
+            }
+            const generated = pickAnimalTraitKey(animal.type);
+            return generated || 'steadfast';
+          })(),
         }))
       : [];
     this.setters.setAnimals(sanitizedAnimals);

@@ -88,3 +88,74 @@ export const ANIMAL_CARE_ACTIONS = {
     cleanlinessBoost: 28,
   },
 };
+
+export const ANIMAL_TRAITS = [
+  {
+    key: 'steadfast',
+    name: '穩健個性',
+    description: '性格穩重，沒有額外效果，容易照顧。',
+    weight: 2,
+    modifiers: {},
+  },
+  {
+    key: 'energetic',
+    name: '活力充沛',
+    description: '羈絆成長較快，但食量也比較大，容易感到飢餓。',
+    weight: 1,
+    modifiers: {
+      hungerLoss: 1.25,
+      bondDecay: 0.85,
+      production: 1.1,
+    },
+  },
+  {
+    key: 'gentle',
+    name: '溫馴體質',
+    description: '抵抗力較高、飢餓下降慢一些，但產量稍微普通。',
+    weight: 1,
+    modifiers: {
+      hungerLoss: 0.9,
+      sicknessRisk: 0.7,
+      production: 0.95,
+    },
+  },
+  {
+    key: 'diligent',
+    name: '勤勞小幫手',
+    description: '產量更高、欄舍保持得較乾淨，但幸福度下降稍快。',
+    weight: 1,
+    modifiers: {
+      production: 1.2,
+      cleanlinessDecay: 0.85,
+      happinessDecay: 1.1,
+    },
+  },
+  {
+    key: 'gourmet',
+    name: '挑嘴吃貨',
+    description: '對食物要求高，餓肚子時情緒跌得更快，但餵飽後產量提升。',
+    weight: 1,
+    modifiers: {
+      hungerLoss: 1.3,
+      hungerMoodPenalty: 1.25,
+      production: 1.15,
+    },
+  },
+];
+
+export const ANIMAL_TRAIT_MAP = ANIMAL_TRAITS.reduce((map, trait) => {
+  map[trait.key] = trait;
+  return map;
+}, {});
+
+export const pickAnimalTraitKey = (animalType) => {
+  const pool = ANIMAL_TRAITS.filter(trait => !trait.types || trait.types.includes(animalType));
+  const source = pool.length > 0 ? pool : ANIMAL_TRAITS;
+  const expanded = source.flatMap(trait => Array(Math.max(1, Math.floor(trait.weight || 1))).fill(trait));
+  const selection = expanded.length > 0 ? expanded : source;
+  if (selection.length === 0) {
+    return null;
+  }
+  const choice = selection[Math.floor(Math.random() * selection.length)];
+  return choice?.key || null;
+};

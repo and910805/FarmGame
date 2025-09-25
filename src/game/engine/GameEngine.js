@@ -10,6 +10,7 @@ import {
   getFarmExpansionCost,
   MAX_ANIMAL_CAPACITY,
   MAX_FARM_PLOTS,
+  pickAnimalTraitKey,
 } from './constants';
 
 export class GameEngine {
@@ -735,6 +736,7 @@ export class GameEngine {
       const prevList = Array.isArray(prev) ? prev : [];
       const baseIndex = prevList.filter(a => a.type === animalType).length;
       const timestamp = Date.now();
+      const traitKey = pickAnimalTraitKey(animalType) || 'steadfast';
       const additions = Array.from({ length: purchasable }, (_, index) => ({
         id: timestamp + index,
         type: animalType,
@@ -750,8 +752,13 @@ export class GameEngine {
         careNeed: null,
         careDays: 0,
         lastCareTime: null,
+        trait: traitKey,
       }));
-      return [...prevList, ...additions];
+      const nextAnimals = [...prevList, ...additions];
+      if (this.stateRef && this.stateRef.current) {
+        this.stateRef.current.animals = nextAnimals;
+      }
+      return nextAnimals;
     });
 
     const label = purchasable > 1 ? `${purchasable} 隻${animal.name}` : `${animal.name}`;

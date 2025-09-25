@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { Sprout, Coins, ShoppingCart, Heart, Home, Sun, Moon, Zap, Droplets, Hammer, Building, Star, Save, Trophy, Settings, MessageCircle, Target, UtensilsCrossed, TrendingUp, TrendingDown, Clock3, Boxes, Sparkles } from 'lucide-react';
+import { Sprout, Coins, ShoppingCart, Heart, Home, Sun, Moon, Zap, Droplets, Hammer, Building, Star, Save, Trophy, Settings, MessageCircle, Target, UtensilsCrossed, TrendingUp, TrendingDown, Clock3, Boxes, Sparkles, Pencil, Check, X, Gem } from 'lucide-react';
 import { CROPS, ANIMALS, BUILDINGS, TOOLS, ACHIEVEMENTS, NPCS, WEATHER_TYPES, SEASONS, FARM_SUPPLIES, ANIMAL_PRODUCTS } from './game/data/GameCatalog';
 import { GameFormatter } from './game/utils/GameFormatter';
 import { GameEngine } from './game/engine/GameEngine';
@@ -14,6 +14,8 @@ import {
   ANIMAL_CAPACITY_STEP,
   BUILDING_UPGRADES,
   ANIMAL_CARE_ACTIONS,
+  ANIMAL_TRAITS,
+  ANIMAL_TRAIT_MAP,
 } from './game/engine/constants';
 import { SaveManager } from './game/engine/SaveManager';
 import { NotificationCenter } from './game/engine/NotificationCenter';
@@ -475,6 +477,8 @@ const FarmGame = () => {
 
   const [animals, setAnimals] = useState([]);
   const [animalCapacity, setAnimalCapacity] = useState(BASE_ANIMAL_CAPACITY);
+  const [renamingAnimalId, setRenamingAnimalId] = useState(null);
+  const [pendingAnimalName, setPendingAnimalName] = useState('');
   const [buildings, setBuildings] = useState({});
   const [tools, setTools] = useState('basic');
   const [ownedTools, setOwnedTools] = useState(() => ['basic']);
@@ -510,6 +514,88 @@ const FarmGame = () => {
   const dismissNotification = useCallback((id) => {
     notificationCenter.dismiss(id);
   }, [notificationCenter]);
+
+  const startAnimalRename = useCallback((animal) => {
+    if (!animal) {
+      return;
+    }
+    setRenamingAnimalId(animal.id);
+    setPendingAnimalName(animal.name || '');
+  }, []);
+
+  const cancelAnimalRename = useCallback(() => {
+    setRenamingAnimalId(null);
+    setPendingAnimalName('');
+  }, []);
+
+  const commitAnimalRename = useCallback(() => {
+    if (!renamingAnimalId) {
+      return;
+    }
+
+    let finalizedName = null;
+    setAnimals(prevAnimals => {
+      if (!Array.isArray(prevAnimals) || prevAnimals.length === 0) {
+        return prevAnimals;
+      }
+
+      const targetIndex = prevAnimals.findIndex(entry => entry.id === renamingAnimalId);
+      if (targetIndex === -1) {
+        return prevAnimals;
+      }
+
+      const targetAnimal = prevAnimals[targetIndex];
+      const sanitizedInput = pendingAnimalName.replace(/\s+/g, ' ').trim().slice(0, 20);
+      const others = prevAnimals.filter(entry => entry.id !== renamingAnimalId);
+      const usedNames = new Set(others.map(entry => entry.name).filter(Boolean));
+      const baseLabel = ANIMALS[targetAnimal.type]?.name || '動物';
+      let candidate = sanitizedInput;
+
+      if (!candidate) {
+        let suffix = 1;
+        candidate = `${baseLabel}${suffix}`;
+        while (usedNames.has(candidate)) {
+          suffix += 1;
+          candidate = `${baseLabel}${suffix}`;
+        }
+      } else if (usedNames.has(candidate)) {
+        let suffix = 2;
+        while (usedNames.has(`${candidate} (${suffix})`)) {
+          suffix += 1;
+        }
+        candidate = `${candidate} (${suffix})`;
+      }
+
+      finalizedName = candidate;
+      const nextAnimals = prevAnimals.map(entry => (
+        entry.id === renamingAnimalId
+          ? { ...entry, name: candidate }
+          : entry
+      ));
+      stateRef.current.animals = nextAnimals;
+      return nextAnimals;
+    });
+
+    if (finalizedName) {
+      addNotification(`🐾 ${finalizedName} 很喜歡這個名字！`, { type: 'success' });
+    }
+    setRenamingAnimalId(null);
+    setPendingAnimalName('');
+  }, [renamingAnimalId, pendingAnimalName, setAnimals, addNotification]);
+
+  const handleAnimalRenameChange = useCallback((event) => {
+    setPendingAnimalName(event.target.value);
+  }, []);
+
+  const handleAnimalRenameKeyDown = useCallback((event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      commitAnimalRename();
+    } else if (event.key === 'Escape') {
+      event.preventDefault();
+      cancelAnimalRename();
+    }
+  }, [commitAnimalRename, cancelAnimalRename]);
 
   const questManager = useMemo(() => new QuestManager({
     stateRef,
@@ -1308,9 +1394,19 @@ const FarmGame = () => {
               const animalData = ANIMALS[animal.type];
               const shelterKey = animalData.shelter;
               const boost = gameEngine.getShelterBoost(buildings, shelterKey);
+              const traitMeta = animal.trait ? ANIMAL_TRAIT_MAP[animal.trait] : null;
+              const traitModifiers = traitMeta?.modifiers || {};
+              const hungerLossFactor = traitModifiers.hungerLoss ?? 1;
+              const happinessDecayFactor = traitModifiers.happinessDecay ?? 1;
+              const bondDecayFactor = traitModifiers.bondDecay ?? 1;
+              const cleanlinessDecayFactor = traitModifiers.cleanlinessDecay ?? 1;
+              const sicknessRiskFactor = traitModifiers.sicknessRisk ?? 1;
+              const productionFactor = traitModifiers.production ?? 1;
+              const hungerMoodPenaltyFactor = traitModifiers.hungerMoodPenalty ?? 1;
 
               const previousHunger = animal.hunger ?? 60;
-              const hunger = Math.max(0, previousHunger - ANIMAL_ECOLOGY_CONFIG.dailyHungerLoss);
+              const hungerLoss = ANIMAL_ECOLOGY_CONFIG.dailyHungerLoss * hungerLossFactor;
+              const hunger = Math.max(0, previousHunger - hungerLoss);
 
               if (hunger <= 0) {
                 starvationLosses.push(animal.name);
@@ -1318,15 +1414,16 @@ const FarmGame = () => {
               }
 
               const baseHappiness = animal.happiness ?? animalData.happiness;
-              let happiness = Math.max(0, baseHappiness - ANIMAL_ECOLOGY_CONFIG.happinessDecay);
+              const happinessDecay = ANIMAL_ECOLOGY_CONFIG.happinessDecay * happinessDecayFactor;
+              let happiness = Math.max(0, baseHappiness - happinessDecay);
               let sick = Boolean(animal.sick);
               const wasSick = Boolean(animal.sick);
               let sicknessDays = animal.sicknessDays ?? (wasSick ? 1 : 0);
 
               let bond = Math.max(0, animal.bond ?? 0);
-              bond = Math.max(0, Math.min(100, bond - ANIMAL_INTERACTION_CONFIG.bondDecay));
+              bond = Math.max(0, Math.min(100, bond - (ANIMAL_INTERACTION_CONFIG.bondDecay * bondDecayFactor)));
               let cleanliness = Math.max(0, animal.cleanliness ?? 80);
-              cleanliness = Math.max(0, Math.min(100, cleanliness - ANIMAL_INTERACTION_CONFIG.cleanlinessDecay));
+              cleanliness = Math.max(0, Math.min(100, cleanliness - (ANIMAL_INTERACTION_CONFIG.cleanlinessDecay * cleanlinessDecayFactor)));
 
               let careNeed = animal.careNeed && ANIMAL_CARE_ACTIONS[animal.careNeed] ? animal.careNeed : null;
               let careDays = Math.max(0, animal.careDays ?? 0);
@@ -1365,7 +1462,7 @@ const FarmGame = () => {
                     if (careDays >= 3) {
                       careWarnings.push(`${animal.name}（${meta.shortLabel}）`);
                     }
-                    const sicknessChance = ANIMAL_INTERACTION_CONFIG.neglectSicknessChance * Math.max(1, careDays - 1);
+                    const sicknessChance = ANIMAL_INTERACTION_CONFIG.neglectSicknessChance * Math.max(1, careDays - 1) * sicknessRiskFactor;
                     if (!sick && Math.random() < sicknessChance) {
                       sick = true;
                       newlySick.push(animal.name);
@@ -1380,17 +1477,20 @@ const FarmGame = () => {
 
               if (hunger <= ANIMAL_ECOLOGY_CONFIG.severeHungerThreshold) {
                 hungryNames.push(`${animal.name}（急需餵食）`);
-                happiness = Math.max(0, happiness - ANIMAL_ECOLOGY_CONFIG.severeHungerPenalty);
+                happiness = Math.max(0, happiness - (ANIMAL_ECOLOGY_CONFIG.severeHungerPenalty * hungerMoodPenaltyFactor));
                 canProduce = false;
               } else if (hunger <= ANIMAL_ECOLOGY_CONFIG.hungerWarningThreshold) {
                 hungryNames.push(animal.name);
-                happiness = Math.max(0, happiness - ANIMAL_ECOLOGY_CONFIG.moderateHungerPenalty);
+                happiness = Math.max(0, happiness - (ANIMAL_ECOLOGY_CONFIG.moderateHungerPenalty * hungerMoodPenaltyFactor));
                 canProduce = happiness > 30;
               }
 
               if (!sick && (hunger <= ANIMAL_ECOLOGY_CONFIG.sicknessTriggerThreshold || happiness <= ANIMAL_ECOLOGY_CONFIG.sicknessTriggerThreshold)) {
-                sick = true;
-                newlySick.push(animal.name);
+                const triggerChance = Math.min(1, Math.max(0, sicknessRiskFactor));
+                if (Math.random() < triggerChance) {
+                  sick = true;
+                  newlySick.push(animal.name);
+                }
               }
 
               if (cleanliness < ANIMAL_INTERACTION_CONFIG.cleanlinessThreshold) {
@@ -1401,7 +1501,7 @@ const FarmGame = () => {
                 filthyPens.push(animal.name);
                 happiness = Math.max(0, happiness - ANIMAL_INTERACTION_CONFIG.severeCleanlinessPenalty);
                 bond = Math.max(0, bond - 1);
-                if (!sick && Math.random() < ANIMAL_INTERACTION_CONFIG.cleanlinessSicknessChance) {
+                if (!sick && Math.random() < ANIMAL_INTERACTION_CONFIG.cleanlinessSicknessChance * sicknessRiskFactor) {
                   sick = true;
                   newlySick.push(animal.name);
                 }
@@ -1427,11 +1527,11 @@ const FarmGame = () => {
                 if (animalData.product && ANIMAL_PRODUCTS[animalData.product]) {
                   const productKey = animalData.product;
                   const baseUnits = 1;
-                  const units = Math.max(1, Math.round(baseUnits * boost * (happiness / 100)));
+                  const units = Math.max(1, Math.round(baseUnits * boost * (happiness / 100) * productionFactor));
                   productReady += units;
                   producedGoods[productKey] = (producedGoods[productKey] || 0) + units;
                 } else {
-                  income = Math.floor((animalData.income || 0) * boost * (happiness / 100));
+                  income = Math.floor((animalData.income || 0) * boost * (happiness / 100) * productionFactor);
                 }
               }
               totalIncome += income;
@@ -2343,6 +2443,9 @@ const FarmGame = () => {
                     const careMeta = careNeed ? ANIMAL_CARE_ACTIONS[careNeed] : null;
                     const careDays = Math.max(0, animal.careDays ?? 0);
                     const careUrgent = careDays >= 3;
+                    const traitInfo = animal.trait && ANIMAL_TRAIT_MAP[animal.trait]
+                      ? ANIMAL_TRAIT_MAP[animal.trait]
+                      : ANIMAL_TRAIT_MAP.steadfast;
                     return (
                       <div key={animal.id}
                            className={`rounded-lg p-3 transition-colors relative border ${
@@ -2367,7 +2470,57 @@ const FarmGame = () => {
                           <div className="text-3xl animate-bounce">
                             {animalData.emoji}
                           </div>
-                          <div className="text-sm font-semibold">{animal.name}</div>
+                          <div className="space-y-1">
+                            {renamingAnimalId === animal.id ? (
+                              <div className="flex items-center justify-center gap-1">
+                                <input
+                                  value={pendingAnimalName}
+                                  onChange={handleAnimalRenameChange}
+                                  onKeyDown={handleAnimalRenameKeyDown}
+                                  className="w-24 rounded border border-blue-200 px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-400"
+                                  maxLength={24}
+                                  autoFocus
+                                />
+                                <button
+                                  type="button"
+                                  onClick={commitAnimalRename}
+                                  className="p-1 rounded bg-green-500 hover:bg-green-600 text-white"
+                                  aria-label="儲存動物名稱"
+                                >
+                                  <Check className="w-3 h-3" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={cancelAnimalRename}
+                                  className="p-1 rounded bg-gray-200 hover:bg-gray-300 text-gray-700"
+                                  aria-label="取消重新命名"
+                                >
+                                  <X className="w-3 h-3" />
+                                </button>
+                              </div>
+                            ) : (
+                              <div className="flex items-center justify-center gap-2">
+                                <span className="text-sm font-semibold">{animal.name}</span>
+                                <button
+                                  type="button"
+                                  onClick={() => startAnimalRename(animal)}
+                                  className="text-xs text-blue-600 hover:text-blue-800"
+                                  aria-label="重新命名動物"
+                                >
+                                  <Pencil className="w-3 h-3" />
+                                </button>
+                              </div>
+                            )}
+                            {traitInfo && (
+                              <div
+                                className="flex items-center justify-center gap-1 text-[11px] text-amber-700"
+                                title={traitInfo.description}
+                              >
+                                <Gem className="w-3 h-3" />
+                                <span>{traitInfo.name}</span>
+                              </div>
+                            )}
+                          </div>
                           <div className="space-y-1 text-xs">
                             <div className="flex items-center justify-center gap-1">
                               <Heart className="w-3 h-3 text-red-400" />
@@ -3287,6 +3440,17 @@ const FarmGame = () => {
                   <li>每天餵食會扣飼料費，但能維持快樂度（最高 100）。</li>
                   <li>快樂度越高，產出的金幣越多；建築會提供額外加成。</li>
                   <li>動物長期飢餓或心情低落會生病，產出停擺，記得準備營養劑治療。</li>
+                </ul>
+              </section>
+              <section>
+                <h3 className="font-semibold text-lg text-pink-600">🧬 動物特質</h3>
+                <p className="mt-2">每隻動物現在都會擁有隨機特質，會影響飢餓速度、生病風險或產量表現。試著照顧牠們的性格，善用優勢、彌補弱點！</p>
+                <ul className="list-disc pl-5 space-y-1 mt-2">
+                  {ANIMAL_TRAITS.map(trait => (
+                    <li key={trait.key}>
+                      <span className="font-semibold text-rose-500">{trait.name}</span>：{trait.description}
+                    </li>
+                  ))}
                 </ul>
               </section>
               <section>
