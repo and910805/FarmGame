@@ -720,6 +720,7 @@ const FarmGame = () => {
   const [previousMarketPrices, setPreviousMarketPrices] = useState({});
   const [marketUpdateTime, setMarketUpdateTime] = useState(null);
   const [dailyStats, setDailyStats] = useState([]);
+  const [lifetimeStats, setLifetimeStats] = useState({ cropsPlanted: 0 });
   const [automation, setAutomation] = useState({ autoWater: false, autoHarvest: false });
   const [seasonalEvents, setSeasonalEvents] = useState([]);
   const [seasonalEventHistory, setSeasonalEventHistory] = useState({});
@@ -762,6 +763,7 @@ const FarmGame = () => {
     toolLevels,
     completedAchievements,
     dailyStats,
+    lifetimeStats,
     automation,
     marketPrices,
     previousMarketPrices,
@@ -808,6 +810,7 @@ const FarmGame = () => {
       setQuestLog,
       setCompletedAchievements,
       setDailyStats,
+      setLifetimeStats,
       setAutomation,
       setMarketPrices,
       setPreviousMarketPrices,
@@ -844,6 +847,7 @@ const FarmGame = () => {
       setFarm,
       setEnergy,
       setExperience,
+      setLifetimeStats,
       setInventory,
       setFarmSupplies,
       setAnimals,
@@ -1194,10 +1198,19 @@ const FarmGame = () => {
     ACHIEVEMENTS.forEach(achievement => {
       if (!completedAchievements.has(achievement.id)) {
         let unlocked = false;
-        
+
         switch (achievement.id) {
           case 'firstPlant':
             unlocked = farm.some(plot => plot.crop);
+            break;
+          case 'planter100':
+            unlocked = (lifetimeStats?.cropsPlanted || 0) >= 100;
+            break;
+          case 'planter500':
+            unlocked = (lifetimeStats?.cropsPlanted || 0) >= 500;
+            break;
+          case 'planter1000':
+            unlocked = (lifetimeStats?.cropsPlanted || 0) >= 1000;
             break;
           case 'richFarmer':
             unlocked = money >= 10000;
@@ -1223,7 +1236,7 @@ const FarmGame = () => {
         }
       }
     });
-  }, [money, animals, buildings, level, farm, completedAchievements, addNotification]);
+  }, [money, animals, buildings, level, farm, completedAchievements, addNotification, lifetimeStats]);
 
   // 時間系統
   useEffect(() => {

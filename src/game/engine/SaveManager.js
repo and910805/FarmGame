@@ -54,6 +54,15 @@ const createDefaultSupplies = () => ({
   medicine: 0,
 });
 
+const createDefaultLifetimeStats = () => ({
+  cropsPlanted: 0,
+});
+
+const withLifetimeStats = (stats) => ({
+  ...createDefaultLifetimeStats(),
+  ...(stats && typeof stats === 'object' ? stats : {}),
+});
+
 export class SaveManager {
   constructor({ stateRef, setters, notifier }) {
     this.stateRef = stateRef;
@@ -105,6 +114,7 @@ export class SaveManager {
       marketCommissions,
       commissionHistory,
       marketBoosts,
+      lifetimeStats,
     } = this.state;
 
     const safeFarm = Array.isArray(farm) ? farm : [];
@@ -149,8 +159,9 @@ export class SaveManager {
       marketCommissions: Array.isArray(marketCommissions) ? marketCommissions : [],
       commissionHistory: commissionHistory && typeof commissionHistory === 'object' ? { ...commissionHistory } : {},
       marketBoosts: marketBoosts && typeof marketBoosts === 'object' ? { ...marketBoosts } : {},
+      lifetimeStats: withLifetimeStats(lifetimeStats),
       saveTime: new Date().toISOString(),
-      version: '1.1',
+      version: '1.2',
     };
   }
 
@@ -195,6 +206,9 @@ export class SaveManager {
     const normalizedInventory = withInventoryDefaults(gameState.inventory);
     this.setters.setInventory(normalizedInventory);
     this.setters.setQuestLog(gameState.questLog ? { ...gameState.questLog } : {});
+    if (typeof this.setters.setLifetimeStats === 'function') {
+      this.setters.setLifetimeStats(withLifetimeStats(gameState.lifetimeStats));
+    }
     if (typeof this.setters.setDynamicQuests === 'function') {
       const dynamic = gameState.dynamicQuests && typeof gameState.dynamicQuests === 'object'
         ? { ...gameState.dynamicQuests }

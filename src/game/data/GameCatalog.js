@@ -334,6 +334,9 @@ class GameCatalog {
 
     this.achievements = [
       new Achievement({ id: 'firstPlant', name: '初次種植', description: '種下第一株作物', reward: 100, icon: '🌱' }),
+      new Achievement({ id: 'planter100', name: '新銳栽培家', description: '累計種植100株作物', reward: 250, icon: '🌿' }),
+      new Achievement({ id: 'planter500', name: '資深栽培家', description: '累計種植500株作物', reward: 600, icon: '🪴' }),
+      new Achievement({ id: 'planter1000', name: '傳奇栽培家', description: '累計種植1000株作物', reward: 1200, icon: '🌳' }),
       new Achievement({ id: 'richFarmer', name: '富豪農夫', description: '擁有10000金幣', reward: 500, icon: '💰' }),
       new Achievement({ id: 'animalLover', name: '動物愛好者', description: '擁有10隻動物', reward: 300, icon: '🐾' }),
       new Achievement({ id: 'builder', name: '建築大師', description: '建造5個建築', reward: 800, icon: '🏗️' }),

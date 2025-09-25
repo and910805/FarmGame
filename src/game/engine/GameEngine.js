@@ -580,7 +580,7 @@ export class GameEngine {
   }
 
   plantSeed(plotId) {
-    const { selectedSeed, tools, energy, money, inventory, season, farm } = this.state;
+    const { selectedSeed, tools, energy, money, inventory, season, farm, lifetimeStats } = this.state;
     if (!selectedSeed) return;
 
     const farmList = Array.isArray(farm) ? farm : [];
@@ -627,6 +627,19 @@ export class GameEngine {
       this.stateRef.current.farm = nextFarm;
       return nextFarm;
     });
+
+    if (typeof this.setters.setLifetimeStats === 'function') {
+      const previousStats = lifetimeStats && typeof lifetimeStats === 'object' ? lifetimeStats : {};
+      this.setters.setLifetimeStats(prev => {
+        const base = prev && typeof prev === 'object' ? prev : previousStats;
+        const nextStats = {
+          ...base,
+          cropsPlanted: (base?.cropsPlanted || 0) + 1,
+        };
+        this.stateRef.current.lifetimeStats = nextStats;
+        return nextStats;
+      });
+    }
 
     let remainingSeeds = storedSeeds;
     let remainingMoney = money;
