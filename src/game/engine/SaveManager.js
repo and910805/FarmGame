@@ -379,6 +379,7 @@ export class SaveManager {
           careNeed: animal.careNeed && ANIMAL_CARE_ACTIONS[animal.careNeed] ? animal.careNeed : null,
           careDays: Math.max(0, Math.floor(animal.careDays ?? 0)),
           lastCareTime: animal.lastCareTime ?? null,
+          age: Math.max(0, Math.floor(animal.age ?? 0)),
           butcherableOnDay: Math.max(1, Math.floor(animal.butcherableOnDay ?? 1)),
           trait: (() => {
             if (animal.trait && ANIMAL_TRAIT_MAP[animal.trait]) {

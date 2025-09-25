@@ -1418,6 +1418,7 @@ const FarmGame = () => {
               const previousHunger = animal.hunger ?? 60;
               const hungerLoss = ANIMAL_ECOLOGY_CONFIG.dailyHungerLoss * hungerLossFactor;
               const hunger = Math.max(0, previousHunger - hungerLoss);
+              const nextAge = Math.max(0, Math.floor((animal.age ?? 0) + 1));
 
               if (hunger <= 0) {
                 starvationLosses.push(animal.name);
@@ -1572,6 +1573,7 @@ const FarmGame = () => {
                 cleanliness: Math.max(0, Math.min(100, cleanliness)),
                 careNeed: careNeed || null,
                 careDays: careNeed ? careDays : 0,
+                age: nextAge,
               });
               return list;
             }, []);
@@ -1669,6 +1671,7 @@ const FarmGame = () => {
                     careDays: 0,
                     lastCareTime: null,
                     trait: pickAnimalTraitKey(type) || 'steadfast',
+                    age: 0,
                     butcherableOnDay: newDay + ANIMAL_MIN_BUTCHER_AGE_DAYS,
                   });
                   availableSlots -= 1;
@@ -2461,6 +2464,7 @@ const FarmGame = () => {
                     const careMeta = careNeed ? ANIMAL_CARE_ACTIONS[careNeed] : null;
                     const careDays = Math.max(0, animal.careDays ?? 0);
                     const careUrgent = careDays >= 3;
+                    const ageYears = Math.max(0, Math.floor(animal.age ?? 0));
                     const traitInfo = animal.trait && ANIMAL_TRAIT_MAP[animal.trait]
                       ? ANIMAL_TRAIT_MAP[animal.trait]
                       : ANIMAL_TRAIT_MAP.steadfast;
@@ -2529,6 +2533,10 @@ const FarmGame = () => {
                                 </button>
                               </div>
                             )}
+                            <div className="flex items-center justify-center gap-1 text-[11px] text-slate-600">
+                              <Clock3 className="w-3 h-3" />
+                              <span>年齡 {ageYears} 歲</span>
+                            </div>
                             {traitInfo && (
                               <div
                                 className="flex items-center justify-center gap-1 text-[11px] text-amber-700"

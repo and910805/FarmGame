@@ -756,6 +756,7 @@ export class GameEngine {
           careDays: 0,
           lastCareTime: null,
           trait: traitKey,
+          age: 0,
           butcherableOnDay: currentDay,
         };
       });
