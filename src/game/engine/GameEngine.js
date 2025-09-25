@@ -731,35 +731,46 @@ export class GameEngine {
       return;
     }
 
+    const currentDay = Math.max(1, Math.floor(this.state.day ?? 1));
     this.setters.setMoney(prev => prev - (animal.price * purchasable));
+    let createdAnimals = [];
     this.setters.setAnimals(prev => {
       const prevList = Array.isArray(prev) ? prev : [];
       const baseIndex = prevList.filter(a => a.type === animalType).length;
       const timestamp = Date.now();
-      const traitKey = pickAnimalTraitKey(animalType) || 'steadfast';
-      const additions = Array.from({ length: purchasable }, (_, index) => ({
-        id: timestamp + index,
-        type: animalType,
-        happiness: animal.happiness,
-        hunger: 70,
-        lastFed: Date.now(),
-        sick: false,
-        sicknessDays: 0,
-        name: `${animal.name}${baseIndex + index + 1}`,
-        productReady: 0,
-        bond: 20,
-        cleanliness: 85,
-        careNeed: null,
-        careDays: 0,
-        lastCareTime: null,
-        trait: traitKey,
-      }));
-      const nextAnimals = [...prevList, ...additions];
+      createdAnimals = Array.from({ length: purchasable }, (_, index) => {
+        const traitKey = pickAnimalTraitKey(animalType) || 'steadfast';
+        return {
+          id: timestamp + index,
+          type: animalType,
+          happiness: animal.happiness,
+          hunger: 70,
+          lastFed: Date.now(),
+          sick: false,
+          sicknessDays: 0,
+          name: `${animal.name}${baseIndex + index + 1}`,
+          productReady: 0,
+          bond: 20,
+          cleanliness: 85,
+          careNeed: null,
+          careDays: 0,
+          lastCareTime: null,
+          trait: traitKey,
+          butcherableOnDay: currentDay,
+        };
+      });
+      const nextAnimals = [...prevList, ...createdAnimals];
       if (this.stateRef && this.stateRef.current) {
         this.stateRef.current.animals = nextAnimals;
       }
       return nextAnimals;
     });
+
+    if (createdAnimals.length > 0 && typeof this.setters.promptAnimalNaming === 'function') {
+      const firstNewArrival = createdAnimals[0];
+      const suggestedName = createdAnimals.length === 1 ? (firstNewArrival.name || '') : '';
+      this.setters.promptAnimalNaming(firstNewArrival.id, suggestedName);
+    }
 
     const label = purchasable > 1 ? `${purchasable} 隻${animal.name}` : `${animal.name}`;
     this.notify(`購買了 ${animal.emoji} ${label}！`, { type: 'success' });
@@ -775,6 +786,14 @@ export class GameEngine {
     const animal = animals.find(a => a.id === animalId);
     if (!animal) {
       this.notify('找不到這隻動物。', { type: 'error' });
+      return;
+    }
+
+    const currentDay = Math.max(1, Math.floor(this.state.day ?? 1));
+    if (typeof animal.butcherableOnDay === 'number' && currentDay < animal.butcherableOnDay) {
+      const remaining = animal.butcherableOnDay - currentDay;
+      const waitLabel = remaining === 1 ? '1 天' : `${remaining} 天`;
+      this.notify(`${animal.name} 還是幼年，再過 ${waitLabel} 才能處理牠喔！`, { type: 'warning' });
       return;
     }
 

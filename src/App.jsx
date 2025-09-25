@@ -16,6 +16,8 @@ import {
   ANIMAL_CARE_ACTIONS,
   ANIMAL_TRAITS,
   ANIMAL_TRAIT_MAP,
+  ANIMAL_MIN_BUTCHER_AGE_DAYS,
+  pickAnimalTraitKey,
 } from './game/engine/constants';
 import { SaveManager } from './game/engine/SaveManager';
 import { NotificationCenter } from './game/engine/NotificationCenter';
@@ -528,6 +530,14 @@ const FarmGame = () => {
     setPendingAnimalName('');
   }, []);
 
+  const promptAnimalNaming = useCallback((animalId, suggestedName = '') => {
+    if (!animalId) {
+      return;
+    }
+    setRenamingAnimalId(animalId);
+    setPendingAnimalName(suggestedName || '');
+  }, []);
+
   const commitAnimalRename = useCallback(() => {
     if (!renamingAnimalId) {
       return;
@@ -790,7 +800,7 @@ const FarmGame = () => {
     if (Object.keys(commissionHistoryUpdates).length > 0) {
       setCommissionHistory(prev => ({ ...(prev || {}), ...commissionHistoryUpdates }));
     }
-  }, [addNotification, setSeasonalEvents, setSeasonalEventHistory, setWeatherMissions, setWeatherMissionHistory, setMarketCommissions, setCommissionHistory, stateRef]);
+  }, [addNotification, promptAnimalNaming, setSeasonalEvents, setSeasonalEventHistory, setWeatherMissions, setWeatherMissionHistory, setMarketCommissions, setCommissionHistory, stateRef]);
 
   useEffect(() => {
     questManager.refreshDaily(day);
@@ -959,9 +969,10 @@ const FarmGame = () => {
       setToolLevels,
       setPendingGreenhousePlacement,
       recordQuestEvent,
+      promptAnimalNaming,
     },
     notifier: addNotification,
-  }), [stateRef, addNotification, recordQuestEvent]);
+  }), [stateRef, addNotification, recordQuestEvent, promptAnimalNaming]);
 
   const sprinklerLevel = useMemo(
     () => gameEngine.getBuildingLevel(buildings, 'sprinkler'),
@@ -1657,6 +1668,8 @@ const FarmGame = () => {
                     careNeed: null,
                     careDays: 0,
                     lastCareTime: null,
+                    trait: pickAnimalTraitKey(type) || 'steadfast',
+                    butcherableOnDay: newDay + ANIMAL_MIN_BUTCHER_AGE_DAYS,
                   });
                   availableSlots -= 1;
                 }
@@ -1731,6 +1744,11 @@ const FarmGame = () => {
             stateRef.current.animals = nextAnimals;
             return nextAnimals;
           });
+
+          if (newbornAnimals.length > 0) {
+            const firstNewborn = newbornAnimals[0];
+            promptAnimalNaming(firstNewborn.id, firstNewborn.name || '');
+          }
 
           if (Object.keys(producedGoods).length > 0) {
             const produceSummary = Object.entries(producedGoods).map(([productKey, amount]) => {

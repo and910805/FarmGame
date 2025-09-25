@@ -4,6 +4,7 @@ export const MAX_FARM_PLOTS = 45;
 export const BASE_ANIMAL_CAPACITY = 6;
 export const ANIMAL_CAPACITY_STEP = 1;
 export const MAX_ANIMAL_CAPACITY = 24;
+export const ANIMAL_MIN_BUTCHER_AGE_DAYS = 3;
 
 export const getFarmExpansionCost = (currentPlotCount) => {
   if (currentPlotCount >= MAX_FARM_PLOTS) {
